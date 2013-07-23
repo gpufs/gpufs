@@ -22,9 +22,11 @@ GPUfs requires NVIDIA CUDA 5.0 to be compiled.
 
 1. Environment -- CUDA_ROOT is by default in /usr/local/cuda-5.0, and should be redefined otherwise
 2. Compile the library with 
+> mkdir release
 > make libgpufs.a
 Debug version can be compiled with:
-make dbg=1 libgpufsd.a
+> mkdir debug
+> make dbg=1 libgpufsd.a
 
 Make sure that you "make clean" before compiling
 
