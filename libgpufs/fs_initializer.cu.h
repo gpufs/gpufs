@@ -38,7 +38,7 @@
 #include "radix_tree.cu.h"
 #include "preclose_table.cu.h"
 #include "fs_globals.cu.h"
-#include "gpufs_lib.h"
+#include "gpufs_con_lib.h"
 __global__ void init_fs(volatile CPU_IPC_OPEN_Queue* _ipcOpenQueue, 
 			volatile CPU_IPC_RW_Queue* _ipcRWQueue, 
 			volatile GPU_IPC_RW_Manager* _ipcRWManager, 
