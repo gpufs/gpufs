@@ -1,0 +1,18 @@
+This is a very basic multi-file string matching that works something like this:
+
+for each word in dictionary
+   for each file in the list
+      grep -w word file  | wc >> out
+  end
+end
+
+To compile: 
+make fs
+
+
+To simplify the GPU implementation the input dictionary is converted into a structured format with 32 symbols per word.
+
+run_gpu.sh shows a sample run on a file with  complete works by Shakespere.
+
+This is by far not a super efficient version, it just highlights the way GPUfs can be used
+
