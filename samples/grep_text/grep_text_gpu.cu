@@ -17,6 +17,14 @@
 __device__ volatile INIT_LOCK init_lock;
 __device__ volatile LAST_SEMAPHORE last_lock;
 
+
+__forceinline__ __device__ void memcpy_thread(volatile char* dst, const volatile char* src, uint size)
+{
+        for( int i=0;i<size;i++)
+                dst[i]=src[i];
+}
+
+
 __shared__ char int_to_char_map[10];
 __device__ void init_int_to_char_map()
 {
@@ -184,66 +192,63 @@ __device__ int global_output;
 __shared__ int output_count;
 void __global__ grep_text(char* src, char* out, char* dbs)
 {
-	__shared__ int zfd_src;
-	__shared__ int zfd_o;
-	__shared__ int zfd_dbs;
+	int zfd_src;
+	int zfd_o;
+	int zfd_dbs;
 	__shared__ char* db_files;
-	__shared__ size_t in_size;
-	__shared__ int words_per_chunk;
+	size_t in_size;
+	int words_per_chunk;
 	__shared__ int toInit;
-	__shared__ int data_to_process;
+	int data_to_process;
 	__shared__ char* input_tmp;
 	__shared__ int input_tmp_counts;
 	__shared__ char *output_buffer;
 
 	int total_words;
-	BEGIN_SINGLE_THREAD
-
-		init_int_to_char_map();
 	
-		zfd_dbs=single_thread_open(dbs,O_GRDONLY);
-		if (zfd_dbs<0) ERROR("Failed to open output");
+	zfd_dbs=gopen(dbs,O_GRDONLY);
+	if (zfd_dbs<0) ERROR("Failed to open output");
 
 
-		zfd_o=single_thread_open(out,O_GWRONCE);
-		if (zfd_o<0) ERROR("Failed to open output");
+	zfd_o=gopen(out,O_GWRONCE);
+	if (zfd_o<0) ERROR("Failed to open output");
 		
-		zfd_src=single_thread_open(src,O_GRDONLY);
-		if (zfd_src<0) ERROR("Failed to open input");
+	zfd_src=gopen(src,O_GRDONLY);
+	if (zfd_src<0) ERROR("Failed to open input");
 	
-		in_size=fstat(zfd_src);
+	in_size=fstat(zfd_src);
 	
-		total_words=in_size/32;
+	total_words=in_size/32;
 		
-		if (total_words==0) ERROR("empty input");
+	if (total_words==0) ERROR("empty input");
 
 		
-		words_per_chunk=total_words/gridDim.x;
+	words_per_chunk=total_words/gridDim.x;
 
-		if (words_per_chunk==0) 
-		{
-			words_per_chunk=1;
-			if (blockIdx.x>total_words) {
-				words_per_chunk=0;
-			}
+	if (words_per_chunk==0) 
+	{
+		words_per_chunk=1;
+		if (blockIdx.x>total_words) {
+			words_per_chunk=0;
 		}
+	}
 		
-	END_SINGLE_THREAD
 
-		if (words_per_chunk==0) {
-			BEGIN_SINGLE_THREAD
-				single_thread_close(zfd_o);
-				single_thread_close(zfd_src);
-			END_SINGLE_THREAD
-			return;
-		}
 
-	BEGIN_SINGLE_THREAD
+	if (words_per_chunk==0) {
+		gclose(zfd_o);
+		gclose(zfd_src);
+		return;
+	}
+
 			
-		data_to_process=words_per_chunk*32;
+	data_to_process=words_per_chunk*32;
 	
-		if (blockIdx.x==gridDim.x-1)  data_to_process=fstat(zfd_src)-data_to_process*blockIdx.x;
+	if (blockIdx.x==gridDim.x-1)  data_to_process=fstat(zfd_src)-data_to_process*blockIdx.x;
+	
+	BEGIN_SINGLE_THREAD
 		
+		init_int_to_char_map();
 		input_tmp=(char*)malloc(data_to_process);
 		assert(input_tmp);
 		output_buffer=(char*)malloc(data_to_process/32*(32+FILENAME_SIZE+sizeof(int)));
@@ -252,23 +257,17 @@ void __global__ grep_text(char* src, char* out, char* dbs)
 
 		db_files=(char*) malloc(3*1024*1024);
 		assert(db_files);
-
 		toInit=init_lock.try_wait();
-	
-	END_SINGLE_THREAD
-	if (toInit == 1)
-	{
-		BEGIN_SINGLE_THREAD
+		if (toInit == 1)
+		{
 	
 			global_output=0;
 			single_thread_ftruncate(zfd_o,0);
 			__threadfence();
 			init_lock.signal();
-		END_SINGLE_THREAD
-	}
+		}
+	END_SINGLE_THREAD
 
-	
-	
 
 	int db_bytes_read=gread(zfd_dbs,0,fstat(zfd_dbs),(uchar*)db_files);
 	if(db_bytes_read!=fstat(zfd_dbs)) ERROR("Failed to read dbs");
@@ -284,18 +283,15 @@ void __global__ grep_text(char* src, char* out, char* dbs)
 	if (bytes_read!=to_read) ERROR("FAILED to read input");
 	input_tmp_counts=to_read;
 	__shared__ int db_strlen;
-	int db_data_read;
 	while(current_db=get_next(db_files,&next_db,&db_strlen))
 	{
 		
 		db_files=next_db;
 		db_idx++;
 
-		__shared__ int zfd_db;
-		BEGIN_SINGLE_THREAD
-			zfd_db=single_thread_open((char*)current_db,O_GRDONLY);
-			if (zfd_db<0) ERROR("Failed to open DB file");
-		END_SINGLE_THREAD
+		int zfd_db;
+		zfd_db=gopen((char*)current_db,O_GRDONLY);
+		if (zfd_db<0) ERROR("Failed to open DB file");
 		size_t db_size=fstat(zfd_db);
 			
 	
@@ -373,23 +369,20 @@ void __global__ grep_text(char* src, char* out, char* dbs)
 			}
 		}
 		
-			BEGIN_SINGLE_THREAD
-				single_thread_close(zfd_db);
-				output_count=0;
-			END_SINGLE_THREAD
+		gclose(zfd_db);
+		BEGIN_SINGLE_THREAD
+			output_count=0;
+		END_SINGLE_THREAD
 	}
 	//we are done.
 	//write the output and finish
 		
+       	gclose(zfd_src);
+       	gclose(zfd_dbs);
+	gclose(zfd_o);
 	BEGIN_SINGLE_THREAD
-        	single_thread_close(zfd_src);
-        	single_thread_close(zfd_dbs);
 		free(output_buffer);
 		free(input_tmp);
-                if (last_lock.is_last()){
-                        single_thread_fsync(zfd_o);
-                }
-                single_thread_close(zfd_o);
         END_SINGLE_THREAD
 }
 
