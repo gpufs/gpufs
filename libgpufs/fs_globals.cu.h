@@ -54,7 +54,7 @@ extern __device__ volatile hash_table g_closed_ftable;
 extern __device__ int g_file_id;
 
 //pre close table
-extern __device__ volatile preclose_table* g_preclose_table;
+//extern __device__ volatile preclose_table* g_preclose_table;
 
 
 #endif

@@ -35,7 +35,6 @@
 // no reference counting here
  __device__ int single_thread_fsync(int fd);
  __device__ int single_thread_ftruncate(int fd, int size);
- __device__ int single_thread_close(int fd);
  __device__ int single_thread_open(char* filename, int flags);
 
 #define READ 0

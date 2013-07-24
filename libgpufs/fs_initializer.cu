@@ -40,6 +40,37 @@
 
 #include "fs_initializer.cu.h"
 
+
+/************GLOBALS********/
+// CPU Write-shared memory //
+__device__ volatile CPU_IPC_OPEN_Queue* g_cpu_ipcOpenQueue;
+__device__ volatile CPU_IPC_RW_Queue* g_cpu_ipcRWQueue;
+//
+// manager for rw RPC queue
+
+__device__ volatile GPU_IPC_RW_Manager* g_ipcRWManager;
+
+// Open/Close table
+__device__ volatile OTable* g_otable;
+// Memory pool
+__device__ volatile PPool* g_ppool;
+// File table with block pointers
+__device__ volatile FTable* g_ftable;
+
+// Radix tree memory pool for rt_nodes
+__device__ volatile rt_mempool g_rtree_mempool;
+
+// Hash table with all the previously opened files indexed by their inodes
+__device__ volatile hash_table g_closed_ftable;
+
+// file_id uniq counter
+__device__ int g_file_id;
+
+// a ring buffer for write back
+__device__ async_close_rb_t* g_async_close_rb;
+
+
+
 __global__ void init_fs(volatile CPU_IPC_OPEN_Queue* _ipcOpenQueue, 
 			volatile CPU_IPC_RW_Queue* _ipcRWQueue, 
 			volatile GPU_IPC_RW_Manager* _ipcRWManager, 
@@ -77,8 +108,6 @@ __global__ void init_fs(volatile CPU_IPC_OPEN_Queue* _ipcOpenQueue,
 
 	g_closed_ftable.init_thread(_rtree_array+ MAX_NUM_FILES);
 
-	g_preclose_table=_preclose_table;
-	g_preclose_table->init_thread();
 	
 	g_file_id=0;
 	INIT_ALL_STATS

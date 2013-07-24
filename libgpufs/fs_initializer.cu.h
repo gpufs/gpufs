@@ -147,7 +147,7 @@ struct GPUGlobals{
 		initGpuGlobals(OTable,otable,g_otable);
 		initGpuGlobals(PPool,ppool,g_ppool);
 		initGpuGlobals(FTable,ftable,g_ftable);
-		initGpuGlobals(preclose_table,_preclose_table,g_preclose_table);
+	//	initGpuGlobals(preclose_table,_preclose_table,g_preclose_table);
 	
 		CUDA_SAFE_CALL(cudaMalloc(&rawStorage,sizeof(Page)*PPOOL_FRAMES));
 		CUDA_SAFE_CALL(cudaMemset(rawStorage,0,sizeof(Page)*PPOOL_FRAMES));

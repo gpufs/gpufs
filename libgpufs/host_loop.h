@@ -29,7 +29,7 @@
 #include<stdio.h>
 #include <unistd.h>
 #include <sys/types.h>
-#include "gpufs_lib.h"
+#include "gpufs_con_lib.h"
 
 void fd2name(const int fd, char* name, int namelen){
 
@@ -420,4 +420,24 @@ if(!no_files){
 	if (max_req<cur_req) max_req=cur_req;
 
 }
+
+void run_gpufs_handler(volatile GPUGlobals* gpuGlobals, int deviceNum){
+       int device_num=0;
+        int done=0;
+        while(!done)
+        {
+                open_loop(gpuGlobals,device_num);
+                rw_loop(gpuGlobals);
+                if ( cudaErrorNotReady != cudaStreamQuery(gpuGlobals->streamMgr->kernelStream)) {
+                        fprintf(stderr,"kernel is complete\n");
+                        fprintf(stderr,"Max pending requests: %d\n",max_req);
+                        fprintf(stderr,"Transfer time: %.3f\n",transfer_time);
+                        transfer_time=0;
+                        done=1;
+                }
+                async_close_loop(gpuGlobals);
+        }
+
+}
+
 #endif
