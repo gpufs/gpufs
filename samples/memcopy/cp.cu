@@ -1,67 +1,45 @@
-/* 
-* This expermental software is provided AS IS. 
-* Feel free to use/modify/distribute, 
-* If used, please retain this disclaimer and cite 
-* "GPUfs: Integrating a file system with GPUs", 
-* M Silberstein,B Ford,I Keidar,E Witchel
-* ASPLOS13, March 2013, Houston,USA
-*/
 
-
-
-#ifndef MAIN_FS_FILE
-#error "This file must be included into main CU file. It cannot be used separately"
-#endif
-
-
-__shared__ int zfd;
-
-#define ONE_BLOCK_READ (1<<26 )
+#include "fs_calls.cu.h"
+__device__ int OK;
+__shared__ int zfd,zfd1, zfd2, close_ret;
 
 __device__ LAST_SEMAPHORE sync_sem;
-__global__ void test_cpy(char* src)
+__global__ void test_cpy(char* src, char* dst)
 {
-        __shared__ uchar* scratch;
-        BEGIN_SINGLE_THREAD;
-                zfd=0;
-                zfd=single_thread_open(src,O_GRDONLY);
-		if (zfd<0) ERROR("Cant open file");
-               /* 
-                zfd1=0;
-                zfd1=single_thread_open(dst,O_GWRONCE);
-                if (zfd1<0) { atomicMin(&OK,-2); ERROR("Failed to open dst");}
-                */
-                //scratch=(uchar*)malloc(1<<20);
-                //GPU_ASSERT(scratch!=NULL);
+	__shared__ uchar* scratch;
+	__shared__ size_t filesize;
+	BEGIN_SINGLE_THREAD
+	        scratch=(uchar*)malloc(FS_BLOCKSIZE);
+                GPU_ASSERT(scratch!=NULL);
+	END_SINGLE_THREAD
+
+
+       zfd=0;
+       zfd=gopen(src,O_GRDONLY);
+	
                 
-        END_SINGLE_THREAD;
+       zfd1=0;
+       zfd1=gopen(dst,O_GWRONCE);
+	filesize=fstat(zfd);
 
-        int filesize=fstat(zfd);
 
-        for(size_t me=0; me< ONE_BLOCK_READ; me+=FS_BLOCKSIZE)
-	{
-		int my_offset=blockIdx.x*ONE_BLOCK_READ;
-
-                int toRead=min((unsigned int)FS_BLOCKSIZE,(unsigned int)(filesize-me-my_offset));
-		assert(toRead);
-        	volatile void* p=gmmap(NULL, toRead,0,O_GRDONLY,zfd,my_offset+me);
-		if (p==MAP_FAILED) ERROR("MAP FAILED");
-//		gmunmap(p,0);
+        for(size_t me=blockIdx.x*FS_BLOCKSIZE;me<filesize;me+=FS_BLOCKSIZE*gridDim.x){
+                int toRead=min((unsigned int)FS_BLOCKSIZE,(unsigned int)(filesize-me));
+                if (toRead!=gread(zfd,me,toRead,scratch)){
+			assert(NULL);
+		}
+                
+                if (toRead!=gwrite(zfd1,me,toRead,scratch)){
+			assert(NULL);
+                }
+        
         }
 
-/*
-        BEGIN_SINGLE_THREAD;
-        	if (sync_sem.is_last()) single_thread_fsync(zfd1);
-                close_ret=single_thread_close(zfd);
-                if (close_ret!=0) {atomicMin(&OK,-5); }
-                close_ret=single_thread_close(zfd1);
-                if (close_ret!=0) {atomicMin(&OK,-6); }
-                free(scratch);
-        END_SINGLE_THREAD;
-  */
-	BEGIN_SINGLE_THREAD
-		single_thread_close(zfd);
-	END_SINGLE_THREAD              
+
+	
+	gclose(zfd);
+        gclose(zfd1);
+                
 }
 void init_device_app(){
 
@@ -70,22 +48,22 @@ void init_device_app(){
 
 void init_app()
 {
+      void* d_OK;
+      CUDA_SAFE_CALL(cudaGetSymbolAddress(&d_OK,OK));
+      CUDA_SAFE_CALL(cudaMemset(d_OK,0,sizeof(int)));
 	// INITI LOCK   
 	void* inited;
 
-/*        CUDA_SAFE_CALL(cudaGetSymbolAddress(&inited,init_lock));
-        CUDA_SAFE_CALL(cudaMemset(inited,0,sizeof(INIT_LOCK)));
 	
-	CUDA_SAFE_CALL(cudaGetSymbolAddress(&inited,last_lock));
+	CUDA_SAFE_CALL(cudaGetSymbolAddress(&inited,sync_sem));
         CUDA_SAFE_CALL(cudaMemset(inited,0,sizeof(LAST_SEMAPHORE)));
-*/
 }
 
 double post_app(double time, int trials){
-   //   int res;
-//      CUDA_SAFE_CALL(cudaMemcpyFromSymbol(&res,OK,sizeof(int),0,cudaMemcpyDeviceToHost));
-  //    if(res!=0) fprintf(stderr,"Test Failed, error code: %d \n",res);
-//      else  fprintf(stderr,"Test Success\n");
+      int res;
+      CUDA_SAFE_CALL(cudaMemcpyFromSymbol(&res,OK,sizeof(int),0,cudaMemcpyDeviceToHost));
+      if(res!=0) fprintf(stderr,"Test Failed, error code: %d \n",res);
+      else  fprintf(stderr,"Test Success\n");
  
      return 0;
 }

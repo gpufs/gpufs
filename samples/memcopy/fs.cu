@@ -1,11 +1,3 @@
-/* 
-* This expermental software is provided AS IS. 
-* Feel free to use/modify/distribute, 
-* If used, please retain this disclaimer and cite 
-* "GPUfs: Integrating a file system with GPUs", 
-* M Silberstein,B Ford,I Keidar,E Witchel
-* ASPLOS13, March 2013, Houston,USA
-*/
 
 #include <cuda.h>
 #include <cuda_runtime.h>
@@ -16,46 +8,11 @@
 #include <errno.h>
 #include <unistd.h>
 
-
-#include "fs_constants.h"
 #include "fs_debug.cu.h"
-#include "util.cu.h"
-#include "cpu_ipc.cu.h"
-#include "mallocfree.cu.h"
-#include "fs_structures.cu.h"
-#include "timer.h"
-#include "hash_table.cu.h"
-#include "swapper.cu.h"
-#include "fs_calls.cu.h"
+#include "fs_initializer.cu.h"
 
-/************GLOBALS********/
-// CPU Write-shared memory //
-__device__ volatile CPU_IPC_OPEN_Queue* g_cpu_ipcOpenQueue;
-__device__ volatile CPU_IPC_RW_Queue* g_cpu_ipcRWQueue; 
-//
-// manager for rw RPC queue
-
-__device__ volatile GPU_IPC_RW_Manager* g_ipcRWManager;
-
-// Open/Close table
-__device__ volatile OTable* g_otable;
-// Memory pool
-__device__ volatile PPool* g_ppool;
-// File table with block pointers
-__device__ volatile FTable* g_ftable;
-
-// Radix tree memory pool for rt_nodes
-__device__ volatile rt_mempool g_rtree_mempool;
-
-// Hash table with all the previously opened files indexed by their inodes
-__device__ volatile hash_table g_closed_ftable;
-
-// file_id uniq counter
-__device__ int g_file_id;
-
-//pre close table
-__device__ volatile preclose_table* g_preclose_table;
-
+// INCLUDING CODE INLINE - change later
+#include "host_loop.h"
 
 
 #include <sys/types.h>
@@ -68,10 +25,6 @@ __device__ volatile preclose_table* g_preclose_table;
 #include <unistd.h>
 #include <math.h>
 
-
-#include "fs_initializer.cu.h"
-// INCLUDING CODE INLINE - change later
-#include "host_loop.h"
 
 #define MAIN_FS_FILE
 #include "cp.cu"
@@ -129,10 +82,25 @@ int output_size=FS_BLOCKSIZE;
 #define MAX_TRIALS (10)
 double time_res[MAX_TRIALS];
 
+double match_threshold;
+int global_devicenum;
+
 int main( int argc, char** argv)
 {
 
+        char* threshold=getenv("GREPTH");
+        match_threshold=0.01;
+        if(threshold!=0) match_threshold=strtof(threshold,NULL);
+        fprintf(stderr,"Match threshold is %f\n",match_threshold);
+
+        char* gpudev=getenv("GPUDEVICE");
+        global_devicenum=0;
+        if (gpudev!=NULL) global_devicenum=atoi(gpudev);
 	
+        fprintf(stderr,"GPU device chosen %d\n",global_devicenum);
+	CUDA_SAFE_CALL(cudaSetDevice(global_devicenum));
+
+
 	if(argc<5) {
 		fprintf(stderr,"<kernel_iterations> <blocks> <threads> f1 f2 ... f_#files\n");
 		return -1;
@@ -149,12 +117,13 @@ int main( int argc, char** argv)
 	
 
 	double total_time=0;
+//	int scratch_size=128*1024*1024*4;
 	size_t total_size;
 	
-	CUDA_SAFE_CALL(cudaSetDevice(2));
+
 
 	memset(time_res,0,MAX_TRIALS*sizeof(double));
-for(int i=0;i<trials+1;i++){
+for(int i=1;i<trials+1;i++){
 
 
 	
@@ -176,25 +145,14 @@ for(int i=0;i<trials+1;i++){
 	double time_before=_timestamp();
 	if (!i) time_before=0;
 	// vector, matrix, out
-        test_cpy<<<nblocks,nthreads,0,gpuGlobals->streamMgr->kernelStream>>>(d_filenames[0]);
-	
-	
-	
-	int device_num=0;
-	while(true)
-	{
-		open_loop(gpuGlobals,2);
-		rw_loop(gpuGlobals);
-		if ( cudaErrorNotReady != cudaStreamQuery(gpuGlobals->streamMgr->kernelStream)) {
-			fprintf(stderr,"kernel is complete\n");
-			fprintf(stderr,"Max pending requests: %d\n",max_req);
-			fprintf(stderr,"Transfer time: %.3f\n",transfer_time);
-			transfer_time=0;
-			break;
-		}
-	}
+
+	double c_open, c_rw, c_close;
+	c_open=c_rw=c_close=0;
 
 
+      test_cpy<<<nblocks,nthreads,0,gpuGlobals->streamMgr->kernelStream>>>(d_filenames[0], d_filenames[1]);
+
+	run_gpufs_handler(gpuGlobals,global_devicenum);
     cudaError_t error = cudaDeviceSynchronize();
 	double time_after=_timestamp();
 	if(!i) time_after=0;
@@ -202,7 +160,7 @@ for(int i=0;i<trials+1;i++){
 	if (i>0) {time_res[i]=time_after-time_before;
 		fprintf(stderr," t-%.3f-us\n",time_res[i]);
 	}
-	
+	fprintf(stderr, "open: %.0f, rw %.0f, close %.0f usec\n",c_open,c_rw,c_close);
 
     //Check for errors and failed asserts in asynchronous kernel launch.
     if(error != cudaSuccess )
@@ -246,9 +204,11 @@ for(int i=0;i<trials+1;i++){
 	if (d_filenames) free(d_filenames);
 
 	double thpt=post_app(total_time,trials);
-	struct stat s1;
+	struct stat s1,s2,s3;
 	if (stat(argv[4],&s1)) perror("stat failed");
-	total_size=s1.st_size;
+	if (stat(argv[5],&s2)) perror("stat failed");
+	if (stat(argv[6],&s3)) perror("stat failed");
+	total_size=s1.st_size+s2.st_size+s3.st_size;
 	double d_size=total_size/1024.0/1024.0/1024.0;
 
 	
