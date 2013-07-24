@@ -20,8 +20,10 @@ To compile CPU version
 
 Use img_cpu to generate the input. The program generates several DB files with random floating point vectors 4K elements each. It randomizes the size of each database file too. It creates the set of vectors to search for, and adds them randomly to different offsets in different DBs. We use a simple Euclidean distance to compute the match. 
 
-Below is an example of the command line.
-./fs 1 28 512 in outputr  db_0  db_1 db_2
+Fro example:
+./img_cpu -g test 100 1000 900
+
+./fs 1 28 512 test_in outputr  test_o_0 test_o_1 test_o_2
 
 The output can be parsed with 
 img_cpu -o <output_file>

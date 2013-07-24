@@ -8,7 +8,7 @@
 */
 
 
-
+#include "fs_calls.cu.h"
 #define GREP_ROW_WIDTH (4*1024)
 
 __device__ volatile INIT_LOCK init_lock;
@@ -115,7 +115,6 @@ void __global__ img_gpu(char* src, int src_row_len, int num_db_files, float matc
 	__shared__ int rows_to_process;
 	__shared__ int total_rows;
 	src_row_len=GREP_ROW_WIDTH;
-	BEGIN_SINGLE_THREAD
 		db_files[0]=out2;
 		db_files[1]=out3;
 		db_files[2]=out4;
@@ -123,10 +122,10 @@ void __global__ img_gpu(char* src, int src_row_len, int num_db_files, float matc
 		db_files[4]=out6;
 		db_files[5]=out7;
 	
-		zfd_o=single_thread_open(out,O_GWRONCE);
+		zfd_o=gopen(out,O_GWRONCE);
 		if (zfd_o<0) ERROR("Failed to open output");
 		
-		zfd_src=single_thread_open(src,O_GRDONLY);
+		zfd_src=gopen(src,O_GRDONLY);
 		if (zfd_src<0) ERROR("Failed to open input");
 	
 		in_size=fstat(zfd_src);
@@ -139,24 +138,17 @@ void __global__ img_gpu(char* src, int src_row_len, int num_db_files, float matc
 
 		if (blockIdx.x==gridDim.x-1) rows_to_process=(total_rows - blockIdx.x*rows_per_chunk);
 	
+	BEGIN_SINGLE_THREAD
 		out_buffer=(int*)malloc(rows_to_process*sizeof(int)*3);
-
 		toInit=init_lock.try_wait();
 
-
-	END_SINGLE_THREAD
-
-
-
-	if (toInit == 1)
-	{
-		BEGIN_SINGLE_THREAD
-		
+		if (toInit == 1)
+		{
 			single_thread_ftruncate(zfd_o,0);
 			__threadfence();
 			init_lock.signal();
-		END_SINGLE_THREAD
-	}
+		}
+	END_SINGLE_THREAD
 
 	/*
 	1. decide how many strings  each block does
@@ -188,11 +180,9 @@ void __global__ img_gpu(char* src, int src_row_len, int num_db_files, float matc
 		for( int db_idx=0;db_idx<num_db_files;db_idx++ )
 		{
 			
-			__shared__ int zfd_db;
-			BEGIN_SINGLE_THREAD
-				zfd_db=single_thread_open(db_files[db_idx],O_GRDONLY);
-				if (zfd_db<0) ERROR("Failed to open DB file");
-			END_SINGLE_THREAD
+			int zfd_db;
+			zfd_db=gopen(db_files[db_idx],O_GRDONLY);
+			if (zfd_db<0) ERROR("Failed to open DB file");
 			size_t db_rows=(fstat(zfd_db)/src_row_len)>>2;
 			
 			volatile float* ptr_row_db=get_row(&ph_db.page,&ph_db.file_offset,0,fstat(zfd_db),zfd_db,O_GRDONLY);
@@ -216,9 +206,8 @@ void __global__ img_gpu(char* src, int src_row_len, int num_db_files, float matc
 			}
 			if(gmunmap(ptr_row_db,0)) ERROR("Failed to unmap db");
 			ph_db.page=NULL; ph_db.file_offset=0;
-			BEGIN_SINGLE_THREAD
-				single_thread_close(zfd_db);
-			END_SINGLE_THREAD
+			
+			gclose(zfd_db);
 		
 			if (found) break;
 		}
@@ -236,14 +225,11 @@ void __global__ img_gpu(char* src, int src_row_len, int num_db_files, float matc
 	int write_size=rows_to_process*sizeof(int)*3;
 	if (gwrite(zfd_o,blockIdx.x*rows_per_chunk*sizeof(int)*3,write_size,(uchar*)out_buffer)!=write_size) ERROR("Failed to write output");
 	
+        gclose(zfd_src);
 	BEGIN_SINGLE_THREAD
-        	single_thread_close(zfd_src);
 		free(out_buffer);
-                if (last_lock.is_last()){
-                        single_thread_fsync(zfd_o);
-                }
-                single_thread_close(zfd_o);
         END_SINGLE_THREAD
+        gclose(zfd_o);
 }
 
 
