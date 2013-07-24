@@ -17,44 +17,9 @@
 #include <unistd.h>
 
 
-#include "fs_constants.h"
+#include "fs_globals.cu.h"
+#include "fs_initializer.cu.h"
 #include "fs_debug.cu.h"
-#include "util.cu.h"
-#include "cpu_ipc.cu.h"
-#include "mallocfree.cu.h"
-#include "fs_structures.cu.h"
-#include "timer.h"
-#include "hash_table.cu.h"
-#include "swapper.cu.h"
-#include "fs_calls.cu.h"
-
-/************GLOBALS********/
-// CPU Write-shared memory //
-__device__ volatile CPU_IPC_OPEN_Queue* g_cpu_ipcOpenQueue;
-__device__ volatile CPU_IPC_RW_Queue* g_cpu_ipcRWQueue; 
-//
-// manager for rw RPC queue
-
-__device__ volatile GPU_IPC_RW_Manager* g_ipcRWManager;
-
-// Open/Close table
-__device__ volatile OTable* g_otable;
-// Memory pool
-__device__ volatile PPool* g_ppool;
-// File table with block pointers
-__device__ volatile FTable* g_ftable;
-
-// Radix tree memory pool for rt_nodes
-__device__ volatile rt_mempool g_rtree_mempool;
-
-// Hash table with all the previously opened files indexed by their inodes
-__device__ volatile hash_table g_closed_ftable;
-
-// file_id uniq counter
-__device__ int g_file_id;
-
-//pre close table
-__device__ volatile preclose_table* g_preclose_table;
 
 
 
@@ -69,7 +34,6 @@ __device__ volatile preclose_table* g_preclose_table;
 #include <math.h>
 
 
-#include "fs_initializer.cu.h"
 // INCLUDING CODE INLINE - change later
 #include "host_loop.h"
 
@@ -123,9 +87,6 @@ char*  update_filename(const char* h_filename){
 
 #include <assert.h>
 
-// size of the output used for data staging
-int output_size=FS_BLOCKSIZE;
-
 #define MAX_TRIALS (10)
 double time_res[MAX_TRIALS];
 
@@ -151,7 +112,8 @@ int main( int argc, char** argv)
 	double total_time=0;
 	size_t total_size;
 	
-	CUDA_SAFE_CALL(cudaSetDevice(2));
+	int device_number=2;
+	CUDA_SAFE_CALL(cudaSetDevice(device_number));
 
 	memset(time_res,0,MAX_TRIALS*sizeof(double));
 for(int i=0;i<trials+1;i++){
@@ -178,21 +140,8 @@ for(int i=0;i<trials+1;i++){
 	// vector, matrix, out
         bigmatrix_mmap<<<nblocks,nthreads,0,gpuGlobals->streamMgr->kernelStream>>>(d_filenames[0],d_filenames[1],d_filenames[2]);
 	
-	
-	
-	int device_num=0;
-	while(true)
-	{
-		open_loop(gpuGlobals,2);
-		rw_loop(gpuGlobals);
-		if ( cudaErrorNotReady != cudaStreamQuery(gpuGlobals->streamMgr->kernelStream)) {
-			fprintf(stderr,"kernel is complete\n");
-			fprintf(stderr,"Max pending requests: %d\n",max_req);
-			fprintf(stderr,"Transfer time: %.3f\n",transfer_time);
-			transfer_time=0;
-			break;
-		}
-	}
+	// blocking!!
+	run_gpufs_handler(gpuGlobals,device_number);
 
 
     cudaError_t error = cudaDeviceSynchronize();

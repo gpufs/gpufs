@@ -15,6 +15,7 @@
 #endif
  #include <sys/mman.h>
 #include "fs_constants.h"
+#include "fs_calls.cu.h"
 __device__ volatile INIT_LOCK init_lock;
 __device__ volatile LAST_SEMAPHORE last_lock;
 
@@ -71,33 +72,31 @@ __global__ void bigmatrix_mmap( char* f_v, char* f_m, char* f_out )
 #define MB (1<<20)
 	
 	__shared__ int toInit;
-	BEGIN_SINGLE_THREAD
-		zfd_m=single_thread_open(f_m,O_GRDONLY);
-		if (zfd_m<0) ERROR("Failed to open matrix");
+	
+	zfd_m=gopen(f_m,O_GRDONLY);
+	if (zfd_m<0) ERROR("Failed to open matrix");
 
-		zfd_o=single_thread_open(f_out,O_GWRONCE);
-		if (zfd_o<0) ERROR("Failed to open output");
+	zfd_o=gopen(f_out,O_GWRONCE);
+	if (zfd_o<0) ERROR("Failed to open output");
 		
-		zfd_v=single_thread_open(f_v,O_GRDONLY);
-		if (zfd_v<0) ERROR("Failed to open vector");
+	zfd_v=gopen(f_v,O_GRDONLY);
+	if (zfd_v<0) ERROR("Failed to open vector");
 
-		toInit=init_lock.try_wait();
-	END_SINGLE_THREAD
 
 	volatile float* ptr_v=(volatile float*)gmmap(NULL, fstat(zfd_v),0, O_GRDONLY, zfd_v, 0);
 
 	if (ptr_v==GMAP_FAILED) ERROR("GMMAP failed");
 	
-	if (toInit == 1)
-	{
-		BEGIN_SINGLE_THREAD
-		
+	BEGIN_SINGLE_THREAD
+		toInit=init_lock.try_wait();
+	
+		if (toInit == 1)
+		{
 			single_thread_ftruncate(zfd_o,0);
 			__threadfence();
 			init_lock.signal();
-
-		END_SINGLE_THREAD
-	}
+		}
+	END_SINGLE_THREAD
 
 	size_t size_v=fstat(zfd_v)/sizeof(float);
 			
@@ -159,18 +158,12 @@ __global__ void bigmatrix_mmap( char* f_v, char* f_m, char* f_out )
 	if (gmunmap(ph_m.page,0)) ERROR("Failed to unmap big matrix");
 	if (gmunmap(ph_o.page,0)) ERROR("Failed to unmap output");
 	if (gmunmap(ptr_v,0)) ERROR("Failed to unmap vector");
-	BEGIN_SINGLE_THREAD
-		single_thread_close(zfd_m);
+
+	gclose(zfd_m);
 		
-		single_thread_close(zfd_v);
+	gclose(zfd_v);
 
-		if (last_lock.is_last()){
-	
-			single_thread_fsync(zfd_o);
-
-		}
-		single_thread_close(zfd_o);
-	END_SINGLE_THREAD
+	gclose(zfd_o);
 	
 }
 
