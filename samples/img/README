@@ -1,0 +1,32 @@
+/* 
+* This expermental software is provided AS IS. 
+* Feel free to use/modify/distribute, 
+* If used, please retain this disclaimer and cite 
+* "GPUfs: Integrating a file system with GPUs", 
+* M Silberstein,B Ford,I Keidar,E Witchel
+* ASPLOS13, March 2013, Houston,USA
+*/
+
+
+This example shows how one can use GPUfs to query large data sets.
+
+It is the "prioritized approximate image matching" example from the paper. 
+The input comprises a set of images to match (input), a number of databases to scan, the matching function (in the code) and the matching threshold. The goal is to find all matching images by scanning databases from the first to the last.
+
+To compile: 
+> make fs
+To compile CPU version
+> make img_cpu
+
+Use img_cpu to generate the input. The program generates several DB files with random floating point vectors 4K elements each. It randomizes the size of each database file too. It creates the set of vectors to search for, and adds them randomly to different offsets in different DBs. We use a simple Euclidean distance to compute the match. 
+
+Fro example:
+./img_cpu -g test 100 1000 900
+
+./fs 1 28 512 test_in outputr  test_o_0 test_o_1 test_o_2
+
+The output can be parsed with 
+img_cpu -o <output_file>
+
+
+

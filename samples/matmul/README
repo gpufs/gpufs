@@ -1,0 +1,12 @@
+This is a simple standard version of infamouce matmul example from NVIDIA SDK.
+Instead of generating random inputs in memory, the program generates them in files, and then reads 
+these files from GPU, and writes the kernel's output to an output file. 
+
+A script  run_reuse.sh executes a bunch of tests on different (but perfectly aligned with the #MPs) matrix sizes.
+
+This implementaiton assumes that the working tile on every submatrix fits in a buffer cache page. Moreover, currently this
+implementation assumes that the size of a tile divides both the matrix dimensions and the buffer cache page size.
+That is because GPUfs currently does not support mapping more than one page in contigous memory.  
+Every tile is WA*32*32. So the width of a first matrix (WA) should be 32, 64 or 128, because otherwise it will not fit in 512K page that is currently configured (the dimensions are in 4-byte words). 
+
+

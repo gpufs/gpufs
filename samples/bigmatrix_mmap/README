@@ -1,0 +1,32 @@
+
+/* 
+* This expermental software is provided AS IS. 
+* Feel free to use/modify/distribute, 
+* If used, please retain this disclaimer and cite 
+* "GPUfs: Integrating a file system with GPUs", 
+* M Silberstein,B Ford,I Keidar,E Witchel
+* ASPLOS13, March 2013, Houston,USA
+*/
+
+
+This is a very basic matrix-vector multiply example where data is read/written from/to files
+
+To compile: 
+make fs
+
+To generate  input matrices, use bigmatrix_cpu.
+Note that the code assumes the input to perfectly match threadblock/grid dimensions.
+For C2075 with 14 MPs I used grid sizes being multiple of 14, 256 threads. So the input matrices that were tested:
+128K x 560, 128Kx1120,... etc.
+
+For example, you can generate an input with:
+
+> bigmatrix_cpu try 131072 560
+
+and then run a GPUfs program with:
+
+> ./fs 10 14 256 try_vector try_matrix out
+
+This will run 10 trials with 14 threadblocks and 256 threads/block
+
+
