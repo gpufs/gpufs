@@ -32,7 +32,7 @@
 //#define GPU_ASSERT(x) if (!(x)){WRITE_DEBUG(__FILE__,__LINE__); \
 //	__threadfence_system(); asm("trap;");}; //return;}
 
-#ifndef RELEASE
+#ifdef DEBUG
 #define GPU_ASSERT(x)	assert(x);
 #else
 //#warning "Asserts disabled"

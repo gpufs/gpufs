@@ -35,9 +35,6 @@
 #include "fs_calls.cu.h"
 // no reference counting here
 
-
-
-
 DEBUG_NOINLINE __device__ int single_thread_fsync(int fd)
 {
 	int res=0;
