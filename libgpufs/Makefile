@@ -9,10 +9,13 @@
 
 
 # This Makefile is used to build the library: 
-# Run: make libgpufs.a
-# For debug version: make dbg=1 libgpufsd.a 
-# This file is also included in the makefiles to build user applications
-# See "workloads" directory
+# Run: make
+# For debug version: make dbg=1
+# Output: This will create release/libgpufs.a or debug/libgpufsd.a depending on the "dbg" flag
+
+# For installation, simply run: make [INSTALLDIR=<Installation directory>] install
+# This will create the "lib" and "include" directories in the installation dir (default to ..) and copy all necesarry files there.
+
 LIBGPUFSDIR?=.
 INSTALLDIR?=..
 
@@ -109,11 +112,19 @@ $(OUTPUTDIR)/gpufs_con_lib.o: $(GPUFSLIB)/gpufs_con_lib.cpp $(GPUFSLIB)/gpufs_co
 $(OUTPUTDIR):
 	mkdir -p $(OUTPUTDIR)
 
+ifneq ($(dbg),1)
 install: $(OUTPUTDIR)/libgpufs.a
 	mkdir -p $(INSTALLDIR)/lib
 	mkdir -p $(INSTALLDIR)/include
 	install -m 0755 $(OUTPUTDIR)/libgpufs.a $(INSTALLDIR)/lib
 	install -m 0644 *.h $(GPUFSLIB)/*.h $(INSTALLDIR)/include
+else
+install: $(OUTPUTDIR)/libgpufsd.a
+	mkdir -p $(INSTALLDIR)/lib
+	mkdir -p $(INSTALLDIR)/include
+	install -m 0755 $(OUTPUTDIR)/libgpufsd.a $(INSTALLDIR)/lib
+	install -m 0644 *.h $(GPUFSLIB)/*.h $(INSTALLDIR)/include
+endif
 
 
 PHONY:  clean
