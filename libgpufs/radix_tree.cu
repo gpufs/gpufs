@@ -94,6 +94,7 @@ DEBUG_NOINLINE __device__ int rtree::getOffsetLevel(size_t d_offset, unsigned ch
 			GPU_ASSERT(tree_lock);\
 			(new_ptr)->n_leaves++; GPU_ASSERT((new_ptr)->n_leaves<=NUM_LEAVES);\
 			(new_ptr)=rt_node::alloc(( rt_node volatile**)tmp);\
+			GPU_ASSERT(new_ptr == NULL);\
 		} \
 		else return NULL;
 

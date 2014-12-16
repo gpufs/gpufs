@@ -32,10 +32,10 @@
 //#define GPU_ASSERT(x) if (!(x)){WRITE_DEBUG(__FILE__,__LINE__); \
 //	__threadfence_system(); asm("trap;");}; //return;}
 
-#ifndef RELEASE
+#ifdef DEBUG
 #define GPU_ASSERT(x)	assert(x);
 #else
-#warning "Asserts disabled"
+//#warning "Asserts disabled"
 #define GPU_ASSERT(x)
 #endif
 
@@ -180,7 +180,9 @@ __forceinline__ __device__ void copy_block(uchar* dst, volatile uchar*src, int s
 
 	newsize=newsize<<shift;
 	__syncthreads();
-	if (threadIdx.x==0){
+//jez 
+// 	if (threadIdx.x ==0){
+	if ((threadIdx.x + threadIdx.y + threadIdx.z) ==0){
 		while(newsize<size){
 			char2 r=readNoCache(src+newsize);
 			dst[newsize]=r.x;newsize++;

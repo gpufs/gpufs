@@ -186,31 +186,23 @@ __device__ void GPU_IPC_RW_Manager::init_thread() volatile
 
 __device__ int GPU_IPC_RW_Manager::findEntry() volatile
 {
-	int res=0;
+   const int init = blockIdx.x & (RW_IPC_SIZE - 1);
+   int i;
+   // TODO -> lockfree optimization, just attempt to take private TB lock trivial and will work well!!
+   i = init; // assuming one concurrent call PER TB
 
-	while(1)
-	{ //
-		MUTEX_LOCK(_lock);
-		res=RW_IPC_SIZE;
-		for(int i=0;i<RW_IPC_SIZE;i++)
-		{
-			if (readNoCache(&_locker[i]) == IPC_MGR_EMPTY)
-			{
-				_locker[i]=IPC_MGR_BUSY;
-				res=i;
-				__threadfence();
-				break;
-			}
-		}
-		MUTEX_UNLOCK(_lock);
-		if (res != RW_IPC_SIZE) break;
-	}	
-	return res;
-}			
+   do {
+           if (atomicExch((int*)&_locker[i], IPC_MGR_BUSY) == IPC_MGR_EMPTY) {
+                   return i;
+           }
+           i = (i + 1) & (RW_IPC_SIZE - 1);
+   } while (1);
+} 			
 __device__ void GPU_IPC_RW_Manager::freeEntry(int entry) volatile
 {
-	_locker[entry]=IPC_MGR_EMPTY;
-	__threadfence();
+   assert(_locker[entry] == IPC_MGR_BUSY);
+   _locker[entry] = IPC_MGR_EMPTY;
+	//__threadfence();
 }
 	
 

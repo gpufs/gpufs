@@ -173,7 +173,7 @@ struct GPUGlobals{
 	                        perror("gpufs_open failed");
 			}
                 }else{
-			fprintf(stderr,"Warning: GPUFS device was not enabled through USE_GPUFS_DEVICE environment variable\n");
+//			fprintf(stderr,"Warning: GPUFS device was not enabled through USE_GPUFS_DEVICE environment variable\n");
 		}
 
 

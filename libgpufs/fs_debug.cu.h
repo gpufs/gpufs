@@ -157,6 +157,7 @@ extern __device__ unsigned int numKilledBufferCache;
 #define FLUSHED_WRITE 
 #define FLUSHED_READ
 #define TRY_LOCK_FAILED 
+#define KILL_BUFFER_CACHE
 
 
 #define PRINT_FLUSHED_WRITE 

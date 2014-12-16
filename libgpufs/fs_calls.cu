@@ -35,9 +35,6 @@
 #include "fs_calls.cu.h"
 // no reference counting here
 
-
-
-
 DEBUG_NOINLINE __device__ int single_thread_fsync(int fd)
 {
 	int res=0;
@@ -410,7 +407,7 @@ BEGIN_SINGLE_THREAD
 				__threadfence();
 				e->did_open=1;
 				__threadfence();
-				assert(e->cpu_fd>=0);
+				GPU_ASSERT(e->cpu_fd>=0);
 			}else{
 				WAIT_ON_MEM(e->did_open,1);
 			}
@@ -533,10 +530,8 @@ BEGIN_SINGLE_THREAD
 	
 	cpu_fd=g_otable->entries[fd].cpu_fd;
 	GPU_ASSERT(  g_otable->entries[fd].refCount >0 );
-
-
 	
-	if (block_offset+size > FS_BLOCKSIZE) assert("Reading beyond the  page boundary"==0);
+	if (block_offset+size > FS_BLOCKSIZE) GPU_ASSERT("Reading beyond the  page boundary"==0);
 	
 	GPU_ASSERT(block_id<MAX_BLOCKS_PER_FILE);
 	

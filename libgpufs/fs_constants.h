@@ -22,13 +22,13 @@
 
 /** radix tree constants (radix_tree.cu)*/
 #define MAX_LEVELS 4
-#define MAX_RT_NODES 5000
+#define MAX_RT_NODES 100000
 
 // home many ages to swapout at once
 #define MIN_PAGES_SWAPOUT (16)
 
 // number of leaves per node - either 128 or 64
-#define RT_16_LEAVES
+#define RT_64_LEAVES
 
 #ifdef RT_64_LEAVES
 #define NUM_LEAVES 64
@@ -54,18 +54,14 @@
 //#define FS_BLOCKSIZE (1024*1024*2)
 //#define FS_LOGBLOCKSIZE (21)
 
-#define FS_LOGBLOCKSIZE (20)
+#define FS_LOGBLOCKSIZE (13)
 #define FS_BLOCKSIZE (1<<FS_LOGBLOCKSIZE)
 
 #endif
 
-
-
 #define PPOOL_SIZE (1024*1024*1024*2L)
 //#define PPOOL_SIZE (1024*1024*1024)
 #define PPOOL_FRAMES (PPOOL_SIZE>>FS_LOGBLOCKSIZE)
-
-
 
 // FS constants 
 // number of slots in the RB
@@ -85,7 +81,7 @@
 
 //** OPEN CLOSE
 #define FSTABLE_SIZE MAX_NUM_FILES
-#define FILENAME_SIZE 32 // longest filename string 
+#define FILENAME_SIZE 64 // longest filename string
 
 #define FSENTRY_EMPTY 	0
 #define FSENTRY_PENDING	1
