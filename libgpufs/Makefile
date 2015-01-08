@@ -21,12 +21,12 @@ CUDA_ROOT:=/usr/local/cuda/
 CUDA_INCLUDE=-I$(CUDA_ROOT)/include -I$(GPUFSLIB) -I$(LIBGPUFSDIR)
 
 ifneq ($(dbg),1)
-	MACROS=-DDEBUG_NOINLINE="" -DRELEASE=1 -O2
-	NVCC=$(CUDA_ROOT)/bin/nvcc --generate-code code=sm_35,arch=compute_35 $(CUDA_INCLUDE) $(MACROS) -maxrregcount 32 
+	MACROS=-DDEBUG_NOINLINE=""
+	NVCC=$(CUDA_ROOT)/bin/nvcc --generate-code code=sm_35,arch=compute_35 $(CUDA_INCLUDE) $(MACROS) -O2 -maxrregcount 32 
 	OUTPUTDIR=release
 else
-	MACROS=-DDEBUG_NOINLINE="__noinline__" -DDEBUG  -DMALLOC_STATS --debug -O0 -g 
-	NVCC=$(CUDA_ROOT)/bin/nvcc --generate-code code=sm_35,arch=compute_35 $(CUDA_INCLUDE) $(MACROS) --device-debug
+	MACROS=-DDEBUG_NOINLINE="__noinline__" -DDEBUG  -DMALLOC_STATS
+	NVCC=$(CUDA_ROOT)/bin/nvcc --generate-code code=sm_35,arch=compute_35 $(CUDA_INCLUDE) $(MACROS) -O0 --device-debug --debug -g
 	OUTPUTDIR=debug
 endif
 
@@ -109,11 +109,19 @@ $(OUTPUTDIR)/gpufs_con_lib.o: $(GPUFSLIB)/gpufs_con_lib.cpp $(GPUFSLIB)/gpufs_co
 $(OUTPUTDIR):
 	mkdir -p $(OUTPUTDIR)
 
+ifneq ($(dbg),1)
 install: $(OUTPUTDIR)/libgpufs.a
 	mkdir -p $(INSTALLDIR)/lib
 	mkdir -p $(INSTALLDIR)/include
 	install -m 0755 $(OUTPUTDIR)/libgpufs.a $(INSTALLDIR)/lib
 	install -m 0644 *.h $(GPUFSLIB)/*.h $(INSTALLDIR)/include
+else
+install: $(OUTPUTDIR)/libgpufsd.a
+	mkdir -p $(INSTALLDIR)/lib
+	mkdir -p $(INSTALLDIR)/include
+	install -m 0755 $(OUTPUTDIR)/libgpufsd.a $(INSTALLDIR)/lib
+	install -m 0644 *.h $(GPUFSLIB)/*.h $(INSTALLDIR)/include
+endif
 
 
 PHONY:  clean

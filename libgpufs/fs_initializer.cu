@@ -108,9 +108,9 @@ __global__ void init_fs(volatile CPU_IPC_OPEN_Queue* _ipcOpenQueue,
 
 	g_closed_ftable.init_thread(_rtree_array+ MAX_NUM_FILES);
 
-	
 	g_file_id=0;
 	INIT_ALL_STATS
+	INIT_TIMING_STATS
 	//INIT_DEBUG
 }
 

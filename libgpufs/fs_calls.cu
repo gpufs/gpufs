@@ -339,6 +339,8 @@ DEBUG_NOINLINE __device__ volatile FTable_page* getRwLockedPage(volatile FTable_
 BEGIN_SINGLE_THREAD
 
 	int deadlock=0;
+
+RT_SEARCH_START
 	
 	int file_id=fentry->pages->file_id;
 	while(1){
@@ -356,12 +358,19 @@ BEGIN_SINGLE_THREAD
 			}
 			
 		}
+
+		LOCKED_TRIES;
+
+		RT_WAIT_START
 		fentry->pages->lock_tree();
+		RT_WAIT_STOP
+
 		fpage=fentry->pages->getLeaf(block_id,&pstate,1,type_req); // locked version - updates all the counters
+
 		fentry->pages->unlock_tree();
 		// TODO: handle file size!
 		// TODO: add reasonable dirty bitmap update here
-	
+
 		// at this point we have 3 options
 		// 1. pstate == P_INIT => page is locked and needs to be inited
 		// 2. pstate == P_UNDEFINED => page is locked by some other process and we need to
@@ -376,6 +385,10 @@ BEGIN_SINGLE_THREAD
 		
 		break;
 	}
+
+RT_SEARCH_STOP
+
+PAGE_READ_START
 	if (pstate == FTable_page_locker::P_INIT ){
 	
 		GPU_ASSERT(fpage->locker.lock ==1);
@@ -390,14 +403,15 @@ BEGIN_SINGLE_THREAD
 			GPU_ASSERT(0);
 		}
 **/
-
+PAGE_ALLOC_START
 		fpage->allocPage(file_id,block_id<<FS_LOGBLOCKSIZE);
+PAGE_ALLOC_STOP
 //GPU_ASSERT((fpage->frame->file_offset)>=0);
 		
 		// check that the file has been opened
 		volatile OTable_entry* e=&g_otable->entries[fd];
 		
-		
+FILE_OPEN_START
 		 if (readNoCache(&e->did_open) == 0 || readNoCache(&e->did_open) == 2 ) { 
 			// mutual exclusion for concurrent openers
 			int winner=atomicExch((int*)&e->did_open,2);
@@ -413,7 +427,9 @@ BEGIN_SINGLE_THREAD
 			}
 			cpu_fd=e->cpu_fd;
 		 }
+FILE_OPEN_STOP
 			// cpu-fd would be less than 0 if we are opening write_once file	
+CPU_READ_START
 		if (cpu_fd>=0)
 		{
 		   int datasize=read_cpu(cpu_fd,fpage->frame);
@@ -423,9 +439,12 @@ BEGIN_SINGLE_THREAD
                    }
 	           fpage->frame->content_size=datasize;
 		}
+CPU_READ_STOP
 	// 	we move this to the write call because we treat mmap with dirtyCounter
 	//	if (type_req==PAGE_WRITE_ACCESS) fpage->markDirty();
 	}
+PAGE_READ_STOP
+
 	GPU_ASSERT((pstate == FTable_page_locker::P_INIT && fpage->locker.lock) || (( pstate == FTable_page_locker::P_RW  || pstate== FTable_page_locker::P_READY) && fpage->locker.rw_counter>0) );
 	// if we do not need to zero out the page (cpu_fd<0) 
 

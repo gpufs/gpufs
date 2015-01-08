@@ -24,8 +24,8 @@ __device__ unsigned int numMallocs;
 __device__ unsigned int numFrees;
 __device__ unsigned int numPageAllocRetries;
 __device__ unsigned int numLocklessSuccess;
+__device__ unsigned int numLockedTries;
 __device__ unsigned int numWrongFileId;
-
 
 __device__ unsigned int numRtMallocs;
 __device__ unsigned int numRtFrees;
@@ -38,6 +38,16 @@ __device__ unsigned int numFlushedWrites;
 __device__ unsigned int numFlushedReads;
 __device__ unsigned int numTrylockFailed;
 __device__ unsigned int numKilledBufferCache;
+#endif
 
+#ifdef TIMING_STATS
+__device__ unsigned long long KernelTime;
+__device__ unsigned long long RTSearchTime;
+__device__ unsigned long long RTWaitTime;
+__device__ unsigned long long MapTime;
+__device__ unsigned long long PageReadTime;
+__device__ unsigned long long PageAllocTime;
+__device__ unsigned long long FileOpenTime;
+__device__ unsigned long long CPUReadTime;
 #endif
 

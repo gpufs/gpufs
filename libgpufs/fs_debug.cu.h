@@ -1,25 +1,25 @@
 /* 
-* This expermental software is provided AS IS. 
-* Feel free to use/modify/distribute, 
-* If used, please retain this disclaimer and cite 
-* "GPUfs: Integrating a file system with GPUs", 
-* M Silberstein,B Ford,I Keidar,E Witchel
-* ASPLOS13, March 2013, Houston,USA
-*/
+ * This expermental software is provided AS IS.
+ * Feel free to use/modify/distribute,
+ * If used, please retain this disclaimer and cite
+ * "GPUfs: Integrating a file system with GPUs",
+ * M Silberstein,B Ford,I Keidar,E Witchel
+ * ASPLOS13, March 2013, Houston,USA
+ */
 
 /* 
-* This expermental software is provided AS IS. 
-* Feel free to use/modify/distribute, 
-* If used, please retain this disclaimer and cite 
-* "GPUfs: Integrating a file system with GPUs", 
-* M Silberstein,B Ford,I Keidar,E Witchel
-* ASPLOS13, March 2013, Houston,USA
-*/
-
+ * This expermental software is provided AS IS.
+ * Feel free to use/modify/distribute,
+ * If used, please retain this disclaimer and cite
+ * "GPUfs: Integrating a file system with GPUs",
+ * M Silberstein,B Ford,I Keidar,E Witchel
+ * ASPLOS13, March 2013, Houston,USA
+ */
 
 #ifndef FS_DEBUG_CU_H
 #define FS_DEBUG_CU_H
 
+#include <stdint.h>
 
 #if 0
 #define DEBUG_BUF_SIZE 10240
@@ -45,21 +45,21 @@ __device__ int debug_buffer_ptr;
 			     fprintf(stderr,"%s \n", tmp);
 #endif
 
-
 #define PRINT_STATS(SYMBOL) { unsigned int tmp;\
 			     cudaMemcpyFromSymbol(&tmp,SYMBOL,sizeof(int),0,cudaMemcpyDeviceToHost);\
 			     fprintf(stderr,"%s %u\n", #SYMBOL, tmp);}
-		 
 
 #define INIT_STATS(SYMBOL) SYMBOL=0;
+
 /*** malloc stats****/
 #ifdef MALLOC_STATS
+
 extern __device__ unsigned int numMallocs;
 extern __device__ unsigned int numFrees;
 extern __device__ unsigned int numPageAllocRetries;
 extern __device__ unsigned int numLocklessSuccess;
+extern __device__ unsigned int numLockedTries;
 extern __device__ unsigned int numWrongFileId;
-
 
 extern __device__ unsigned int numRtMallocs;
 extern __device__ unsigned int numRtFrees;
@@ -74,17 +74,19 @@ extern __device__ unsigned int numTrylockFailed;
 
 extern __device__ unsigned int numKilledBufferCache;
 
-#define INIT_MALLOC INIT_STATS(numMallocs); INIT_STATS(numFrees); INIT_STATS(numPageAllocRetries); INIT_STATS(numLocklessSuccess); INIT_STATS(numWrongFileId);
+#define INIT_MALLOC INIT_STATS(numMallocs); INIT_STATS(numFrees); INIT_STATS(numPageAllocRetries); INIT_STATS(numLocklessSuccess); INIT_STATS(numWrongFileId); INIT_STATS(numLockedTries);
 #define FREE atomicAdd(&numFrees,1);
 #define MALLOC atomicAdd(&numMallocs,1);
 #define PAGE_ALLOC_RETRIES atomicAdd(&numPageAllocRetries,1);
 #define LOCKLESS_SUCCESS atomicAdd(&numLocklessSuccess,1);
+#define LOCKED_TRIES atomicAdd(&numLockedTries,1);
 #define WRONG_FILE_ID atomicAdd(&numWrongFileId,1);
 
 #define PRINT_MALLOC PRINT_STATS(numMallocs);
 #define PRINT_FREE PRINT_STATS(numFrees);
 #define PRINT_PAGE_ALLOC_RETRIES PRINT_STATS(numPageAllocRetries);
 #define PRINT_LOCKLESS_SUCCESS PRINT_STATS(numLocklessSuccess);
+#define PRINT_LOCKED_TRIES PRINT_STATS(numLockedTries);
 #define PRINT_WRONG_FILE_ID  PRINT_STATS(numWrongFileId);
 
 #define INIT_RT_MALLOC INIT_STATS(numRtMallocs); INIT_STATS(numRtFrees);
@@ -105,14 +107,11 @@ extern __device__ unsigned int numKilledBufferCache;
 #define PRINT_HT_HIT PRINT_STATS(numHT_Hit);
 #define PRINT_HT_MISS PRINT_STATS(numHT_Miss);
 
-
 #define INIT_SWAP_STAT INIT_STATS(numFlushedWrites); INIT_STATS(numFlushedReads); INIT_STATS(numTrylockFailed); INIT_STATS(numKilledBufferCache);
 #define FLUSHED_WRITE atomicAdd(&numFlushedWrites,1);
 #define FLUSHED_READ atomicAdd(&numFlushedReads,1);
 #define TRY_LOCK_FAILED atomicAdd(&numTrylockFailed,1);
 #define KILL_BUFFER_CACHE atomicAdd(&numKilledBufferCache,1);
-
-
 
 #define PRINT_FLUSHED_WRITE PRINT_STATS(numFlushedWrites);
 #define PRINT_FLUSHED_READ PRINT_STATS(numFlushedReads);
@@ -126,12 +125,14 @@ extern __device__ unsigned int numKilledBufferCache;
 #define MALLOC 
 #define PAGE_ALLOC_RETRIES 
 #define LOCKLESS_SUCCESS 
+#define LOCKED_TRIES
 #define WRONG_FILE_ID 
 
 #define PRINT_MALLOC 
 #define PRINT_FREE 
 #define PRINT_PAGE_ALLOC_RETRIES 
-#define PRINT_LOCKLESS_SUCCESS 
+#define PRINT_LOCKLESS_SUCCESS
+#define PRINT_LOCKED_TRIES
 #define PRINT_WRONG_FILE_ID  
 
 #define INIT_RT_MALLOC 
@@ -152,13 +153,11 @@ extern __device__ unsigned int numKilledBufferCache;
 #define PRINT_HT_HIT 
 #define PRINT_HT_MISS 
 
-
 #define INIT_SWAP_STAT 
 #define FLUSHED_WRITE 
 #define FLUSHED_READ
 #define TRY_LOCK_FAILED 
 #define KILL_BUFFER_CACHE
-
 
 #define PRINT_FLUSHED_WRITE 
 #define PRINT_FLUSHED_READ 
@@ -167,6 +166,106 @@ extern __device__ unsigned int numKilledBufferCache;
 
 #endif
 
+/***timing stats****/
+#ifdef TIMING_STATS
+
+extern __device__ unsigned long long RTSearchTime;
+extern __device__ unsigned long long KernelTime;
+extern __device__ unsigned long long RTWaitTime;
+extern __device__ unsigned long long MapTime;
+extern __device__ unsigned long long PageReadTime;
+extern __device__ unsigned long long PageAllocTime;
+extern __device__ unsigned long long FileOpenTime;
+extern __device__ unsigned long long CPUReadTime;
+
+#define PRINT_TIME(SYMBOL, freq, blocks) { unsigned long long tmp;\
+			     cudaMemcpyFromSymbol(&tmp,SYMBOL,sizeof(unsigned long long),0,cudaMemcpyDeviceToHost);\
+			     fprintf(stderr,"%s %f\n", #SYMBOL, ((double)(tmp) / 1e6) / (double)(blocks)); }
+
+#define GET_TIME(timer) \
+	asm volatile ("mov.u64 %0, %%globaltimer;" : "=l"(timer) :);
+
+#define START(timer) \
+	unsigned long long timer##Start; \
+	if( threadIdx.x + threadIdx.y + threadIdx.z == 0 ) \
+	{ \
+		GET_TIME( timer##Start ); \
+	}
+
+#define STOP(timer) \
+	unsigned long long timer##Stop; \
+	if( threadIdx.x + threadIdx.y + threadIdx.z == 0 ) \
+	{ \
+		GET_TIME( timer##Stop ); \
+		atomicAdd(&timer##Time, timer##Stop - timer##Start); \
+	}
+
+//#define GET_TIME(timer) \
+//	asm volatile ("mov.u64 %0, %%clock64;" : "=l"(timer) :);
+
+#define INIT_RT_TIMING INIT_STATS(RTSearchTime); INIT_STATS(KernelTime);
+
+#define KERNEL_START START( Kernel )
+#define KERNEL_STOP STOP( Kernel )
+
+#define RT_SEARCH_START START( RTSearch )
+#define RT_SEARCH_STOP STOP( RTSearch )
+
+#define RT_WAIT_START START( RTWait )
+#define RT_WAIT_STOP STOP( RTWait )
+
+#define MAP_START START( Map )
+#define MAP_STOP STOP( Map )
+
+#define PAGE_READ_START START( PageRead )
+#define PAGE_READ_STOP STOP( PageRead )
+
+#define PAGE_ALLOC_START START( PageAlloc )
+#define PAGE_ALLOC_STOP STOP( PageAlloc )
+
+#define FILE_OPEN_START START( FileOpen )
+#define FILE_OPEN_STOP STOP( FileOpen )
+
+#define CPU_READ_START START( CPURead )
+#define CPU_READ_STOP STOP( CPURead )
+
+#define PRINT_KERNEL_TIME(freq, blocks) PRINT_TIME(KernelTime, freq, blocks);
+#define PRINT_RT_SEARCH_TIME(freq, blocks) PRINT_TIME(RTSearchTime, freq, blocks);
+#define PRINT_RT_WAIT_TIME(freq, blocks) PRINT_TIME(RTWaitTime, freq, blocks);
+#define PRINT_MAP_TIME(freq, blocks) PRINT_TIME(MapTime, freq, blocks);
+#define PRINT_PAGE_READ_TIME(freq, blocks) PRINT_TIME(PageReadTime, freq, blocks);
+#define PRINT_PAGE_ALLOC_TIME(freq, blocks) PRINT_TIME(PageAllocTime, freq, blocks);
+#define PRINT_FILE_OPEN_TIME(freq, blocks) PRINT_TIME(FileOpenTime, freq, blocks);
+#define PRINT_CPU_READ_TIME(freq, blocks) PRINT_TIME(CPUReadTime, freq, blocks);
+
+#else
+
+#define PRINT_TIME(SYMBOL, freq, blocks)
+
+#define GET_TIME(timer)
+
+#define INIT_RT_TIMING
+
+#define KERNEL_START
+#define KERNEL_STOP
+
+#define RT_SEARCH_START
+#define RT_SEARCH_STOP
+
+#define RT_WAIT_START
+#define RT_WAIT_STOP
+
+#define MAP_START
+#define MAP_STOP
+
+#define PRINT_KERNEL_TIME(freq, blocks)
+#define PRINT_RT_SEARCH_TIME(freq, blocks)
+#define PRINT_RT_WAIT_TIME(freq, blocks)
+#define PRINT_MAP_TIME
+
+#endif
+
 #define INIT_ALL_STATS { INIT_MALLOC; INIT_RT_MALLOC; INIT_HT_STAT; INIT_SWAP_STAT; }
+#define INIT_TIMING_STATS { INIT_RT_TIMING; }
 #endif
 
