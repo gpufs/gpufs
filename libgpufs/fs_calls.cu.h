@@ -20,7 +20,6 @@
 #ifndef FS_CALLS_CU
 #define FS_CALLS_CU
 
-#include "radix_tree.cu.h"
 #include "fs_constants.h"
 #include "fs_debug.cu.h"
 #include "util.cu.h"
@@ -39,8 +38,6 @@
 
 #define READ 0
 #define WRITE 1
-
-__device__ volatile FTable_page* getRwLockedPage(volatile FTable_entry* fentry, size_t block_id, int fd, int cpu_fd,int type_req);
 
  __device__ int gclose(int fd);
  __device__ int gopen(char* filename, int flags);

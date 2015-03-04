@@ -20,6 +20,17 @@
 #define FS_DEBUG_CU_H
 
 #include <stdint.h>
+#include <stdio.h>
+
+#if 1
+#define PRINT(...) \
+	if( (threadIdx.x + threadIdx.y + threadIdx.z) ==0 ) \
+	{ \
+		printf(__VA_ARGS__); \
+	}
+#else
+#define PRINT(...)
+#endif
 
 #if 0
 #define DEBUG_BUF_SIZE 10240
@@ -74,6 +85,9 @@ extern __device__ unsigned int numTrylockFailed;
 
 extern __device__ unsigned int numKilledBufferCache;
 
+extern __device__ unsigned int numHM_locklessSuccess;
+extern __device__ unsigned int numHM_lockedSuccess;
+
 #define INIT_MALLOC INIT_STATS(numMallocs); INIT_STATS(numFrees); INIT_STATS(numPageAllocRetries); INIT_STATS(numLocklessSuccess); INIT_STATS(numWrongFileId); INIT_STATS(numLockedTries);
 #define FREE atomicAdd(&numFrees,1);
 #define MALLOC atomicAdd(&numMallocs,1);
@@ -117,6 +131,13 @@ extern __device__ unsigned int numKilledBufferCache;
 #define PRINT_FLUSHED_READ PRINT_STATS(numFlushedReads);
 #define PRINT_TRY_LOCK_FAILED PRINT_STATS(numTrylockFailed);
 #define PRINT_KILL_BUFFER_CACHE PRINT_STATS(numKilledBufferCache);
+
+#define INIT_HM_STAT INIT_STATS(numHM_locklessSuccess); INIT_STATS(numHM_lockedSuccess);
+#define HM_LOCKLESS atomicAdd(&numHM_locklessSuccess,1);
+#define HM_LOCKED atomicAdd(&numHM_lockedSuccess,1);
+
+#define PRINT_HM_LOCKLESS PRINT_STATS(numHM_locklessSuccess);
+#define PRINT_HM_LOCKED PRINT_STATS(numHM_lockedSuccess);
 
 #else
 
@@ -164,6 +185,13 @@ extern __device__ unsigned int numKilledBufferCache;
 #define PRINT_TRY_LOCK_FAILED 
 #define PRINT_KILL_BUFFER_CACHE
 
+#define INIT_HM_STAT
+#define HM_LOCKLESS
+#define HM_LOCKED
+
+#define PRINT_HM_LOCKLESS
+#define PRINT_HM_LOCKED
+
 #endif
 
 /***timing stats****/
@@ -173,14 +201,16 @@ extern __device__ unsigned long long RTSearchTime;
 extern __device__ unsigned long long KernelTime;
 extern __device__ unsigned long long RTWaitTime;
 extern __device__ unsigned long long MapTime;
+extern __device__ unsigned long long CopyBlockTime;
 extern __device__ unsigned long long PageReadTime;
 extern __device__ unsigned long long PageAllocTime;
 extern __device__ unsigned long long FileOpenTime;
 extern __device__ unsigned long long CPUReadTime;
+extern __device__ unsigned long long HashMapSearchTime;
 
 #define PRINT_TIME(SYMBOL, freq, blocks) { unsigned long long tmp;\
 			     cudaMemcpyFromSymbol(&tmp,SYMBOL,sizeof(unsigned long long),0,cudaMemcpyDeviceToHost);\
-			     fprintf(stderr,"%s %f\n", #SYMBOL, ((double)(tmp) / 1e6) / (double)(blocks)); }
+			     fprintf(stderr,"%s %fms\n", #SYMBOL, ((double)(tmp) / 1e6) / (double)(blocks)); }
 
 #define GET_TIME(timer) \
 	asm volatile ("mov.u64 %0, %%globaltimer;" : "=l"(timer) :);
@@ -217,6 +247,9 @@ extern __device__ unsigned long long CPUReadTime;
 #define MAP_START START( Map )
 #define MAP_STOP STOP( Map )
 
+#define COPY_BLOCK_START START( CopyBlock )
+#define COPY_BLOCK_STOP STOP( CopyBlock )
+
 #define PAGE_READ_START START( PageRead )
 #define PAGE_READ_STOP STOP( PageRead )
 
@@ -229,14 +262,19 @@ extern __device__ unsigned long long CPUReadTime;
 #define CPU_READ_START START( CPURead )
 #define CPU_READ_STOP STOP( CPURead )
 
+#define HASH_MAP_SEARCH_START START( HashMapSearch )
+#define HASH_MAP_SEARCH_STOP STOP( HashMapSearch )
+
 #define PRINT_KERNEL_TIME(freq, blocks) PRINT_TIME(KernelTime, freq, blocks);
 #define PRINT_RT_SEARCH_TIME(freq, blocks) PRINT_TIME(RTSearchTime, freq, blocks);
 #define PRINT_RT_WAIT_TIME(freq, blocks) PRINT_TIME(RTWaitTime, freq, blocks);
 #define PRINT_MAP_TIME(freq, blocks) PRINT_TIME(MapTime, freq, blocks);
+#define PRINT_COPY_BLOCK_TIME(freq, blocks) PRINT_TIME(CopyBlockTime, freq, blocks);
 #define PRINT_PAGE_READ_TIME(freq, blocks) PRINT_TIME(PageReadTime, freq, blocks);
 #define PRINT_PAGE_ALLOC_TIME(freq, blocks) PRINT_TIME(PageAllocTime, freq, blocks);
 #define PRINT_FILE_OPEN_TIME(freq, blocks) PRINT_TIME(FileOpenTime, freq, blocks);
 #define PRINT_CPU_READ_TIME(freq, blocks) PRINT_TIME(CPUReadTime, freq, blocks);
+#define PRINT_HASH_MAP_SEARCH_TIME(freq, blocks) PRINT_TIME(HashMapSearchTime, freq, blocks);
 
 #else
 
@@ -258,14 +296,38 @@ extern __device__ unsigned long long CPUReadTime;
 #define MAP_START
 #define MAP_STOP
 
+#define PAGE_READ_START
+#define PAGE_READ_STOP
+
+#define COPY_BLOCK_START
+#define COPY_BLOCK_STOP
+
+#define PAGE_ALLOC_START
+#define PAGE_ALLOC_STOP
+
+#define FILE_OPEN_START
+#define FILE_OPEN_STOP
+
+#define CPU_READ_START
+#define CPU_READ_STOP
+
+#define HASH_MAP_SEARCH_START
+#define HASH_MAP_SEARCH_STOP
+
 #define PRINT_KERNEL_TIME(freq, blocks)
 #define PRINT_RT_SEARCH_TIME(freq, blocks)
 #define PRINT_RT_WAIT_TIME(freq, blocks)
-#define PRINT_MAP_TIME
+#define PRINT_MAP_TIME(freq, blocks)
+#define PRINT_PAGE_READ_TIME(freq, blocks)
+#define PRINT_COPY_BLOCK_TIME(freq, blocks)
+#define PRINT_PAGE_ALLOC_TIME(freq, blocks)
+#define PRINT_FILE_OPEN_TIME(freq, blocks)
+#define PRINT_CPU_READ_TIME(freq, blocks)
+#define PRINT_HASH_MAP_SEARCH_TIME(freq, blocks)
 
 #endif
 
-#define INIT_ALL_STATS { INIT_MALLOC; INIT_RT_MALLOC; INIT_HT_STAT; INIT_SWAP_STAT; }
+#define INIT_ALL_STATS { INIT_MALLOC; INIT_RT_MALLOC; INIT_HT_STAT; INIT_SWAP_STAT; INIT_HM_STAT;}
 #define INIT_TIMING_STATS { INIT_RT_TIMING; }
 #endif
 

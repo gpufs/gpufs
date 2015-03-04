@@ -23,7 +23,6 @@
 #include "fs_constants.h"
 #include "util.cu.h"
 #include "fs_structures.cu.h"
-#include "radix_tree.cu.h"
 #include "cpu_ipc.cu.h"
 #include "fs_globals.cu.h"
 __host__ void CPU_IPC_OPEN_Queue::init_host() volatile
@@ -42,7 +41,8 @@ __host__ void CPU_IPC_RW_Entry::init_host() volatile
 	file_offset=(uint)-1;
 	size=0;
 	type=0;
-	return_value=0;
+	return_offset=0;
+	return_size=0;
 }
 
 __host__ void CPU_IPC_RW_Queue::init_host() volatile
@@ -50,6 +50,17 @@ __host__ void CPU_IPC_RW_Queue::init_host() volatile
 	for(int i=0;i<RW_IPC_SIZE;i++)
 	{
 		entries[i].init_host();
+	}
+}
+
+__host__ void CPU_IPC_RW_Flags::init_host() volatile
+{
+	for(int i=0;i<RW_HOST_WORKERS;i++)
+	{
+		for( int j = 0; j < RW_SCRATCH_PER_WORKER; ++j)
+		{
+			entries[i][j] = 0;
+		}
 	}
 }
 
@@ -153,16 +164,17 @@ __device__ int CPU_IPC_RW_Entry::ftruncate(int _cpu_fd) volatile
 	__threadfence_system();
 
 	WAIT_ON_MEM(status,CPU_IPC_READY);
-	return readNoCache(&return_value);
+	return readNoCache(&return_size);
 }
 __device__ int CPU_IPC_RW_Entry::read_write(int _cpu_fd, size_t _buffer_offset, size_t _file_offset, uint _size, uint _type ) volatile
 {
-	
+	CPU_READ_START
 	cpu_fd=_cpu_fd;
 	buffer_offset=_buffer_offset;
 	size=_size;
 	type=_type;
-	return_value=-1;
+	return_size=-1;
+	return_offset=-1;
 	file_offset=_file_offset;
 
 	__threadfence_system();
@@ -171,7 +183,8 @@ __device__ int CPU_IPC_RW_Entry::read_write(int _cpu_fd, size_t _buffer_offset, 
 	__threadfence_system();
 
 	WAIT_ON_MEM(status,CPU_IPC_READY);
-	return  readNoCache(&return_value);
+	CPU_READ_STOP
+	return  readNoCache(&return_size);
 }
 
 
@@ -197,7 +210,7 @@ __device__ int GPU_IPC_RW_Manager::findEntry() volatile
            }
            i = (i + 1) & (RW_IPC_SIZE - 1);
    } while (1);
-} 			
+}
 __device__ void GPU_IPC_RW_Manager::freeEntry(int entry) volatile
 {
    assert(_locker[entry] == IPC_MGR_BUSY);
@@ -207,12 +220,14 @@ __device__ void GPU_IPC_RW_Manager::freeEntry(int entry) volatile
 	
 
 
-__device__ int CPU_IPC_RW_Queue::read_write_block(int cpu_fd, size_t _buffer_offset, size_t _file_offset, int size, int type) volatile
+__device__ int CPU_IPC_RW_Queue::read_write_block(int cpu_fd, size_t _buffer_offset, size_t _file_offset, int size, int type, int& entry) volatile
 {
-	int entry=g_ipcRWManager->findEntry();
+	entry=g_ipcRWManager->findEntry();
 	int ret_val=entries[entry].read_write(cpu_fd,_buffer_offset,_file_offset,size,type); // this one will wait until done
-	entries[entry].clean();
-	g_ipcRWManager->freeEntry(entry);
+//	int ret_val=size;
+
+//	entries[entry].clean();
+//	g_ipcRWManager->freeEntry(entry);
 	return ret_val;
 }
 	
@@ -229,14 +244,20 @@ __device__ int truncate_cpu(int cpu_fd)
 	return ret_val;
 }
 
-__device__ int read_cpu(int cpu_fd, volatile PFrame* frame)
+__device__ int read_cpu(int cpu_fd, volatile PFrame* frame, int& entry)
 {
 	GPU_ASSERT(cpu_fd>=0);
 	int
-		ret_val=g_cpu_ipcRWQueue->read_write_block(cpu_fd,frame->rs_offset*FS_BLOCKSIZE,frame->file_offset,FS_BLOCKSIZE,RW_IPC_READ);
+		ret_val=g_cpu_ipcRWQueue->read_write_block(cpu_fd,frame->rs_offset*FS_BLOCKSIZE,frame->file_offset,FS_BLOCKSIZE,RW_IPC_READ, entry);
 	if (ret_val<=0) return ret_val;
 	frame->content_size=ret_val;
 	return ret_val;
+}
+
+__device__ void freeEntry(int entry)
+{
+	g_cpu_ipcRWQueue->entries[entry].clean();
+	g_ipcRWManager->freeEntry(entry);
 }
 
 #endif

@@ -27,12 +27,5 @@
 #endif
 
 __device__ int swapout(int npages);
-__device__ int flush_cpu( volatile FTable_entry* file, volatile OTable_entry* e, int flags);
-__device__ int writeback_page(int fd, volatile FTable_page* p );
-DEBUG_NOINLINE __device__ int writeback_page(int cpu_fd, volatile FTable_page* p,int flags, bool tolock);
-
-__device__ int writeback_page_async_on_close(int cpu_fd, volatile FTable_page* p,int flags);
-
-__device__ void writeback_page_async_on_close_done(int cpu_fd);
 
 #endif

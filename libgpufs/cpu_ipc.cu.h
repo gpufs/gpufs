@@ -80,12 +80,14 @@ struct CPU_IPC_RW_Entry
 	volatile size_t file_offset;
 	volatile uint size;
 	volatile char type;
-	volatile int return_value;
+	volatile int scratch_index;
+	volatile int return_size;
+	volatile int return_offset;
 	
 	
 	__device__ void clean() volatile;
 
-	__device__ int read_write(int _cpu_fd, size_t _buffer_offset, size_t _file_offset, uint _size,uint _type ) volatile;
+	__device__ int read_write(int _cpu_fd, size_t _buffer_offset, size_t _file_offset, uint _size,uint _type) volatile;
 	
 	__device__ int ftruncate(int cpu_fd) volatile;
 
@@ -98,10 +100,19 @@ struct CPU_IPC_RW_Queue
 
 	__host__ void init_host() volatile;
 
-	__device__ int  read_write_block(int cpu_fd,size_t  _buffer_offset, size_t _file_offset, int size,int type) volatile;
+	__device__ int  read_write_block(int cpu_fd,size_t  _buffer_offset, size_t _file_offset, int size,int type, int& entry) volatile;
 };
 
-__device__ int read_cpu(int cpu_fd, volatile PFrame* frame);
+struct CPU_IPC_RW_Flags
+{
+	volatile int entries[RW_HOST_WORKERS][RW_SCRATCH_PER_WORKER];
+
+	__host__ void init_host() volatile;
+};
+
+__device__ int read_cpu(int cpu_fd, volatile PFrame* frame, int& entry);
+
+__device__ void freeEntry(int entry);
 
 __device__ int truncate_cpu(int cpu_fd);
 

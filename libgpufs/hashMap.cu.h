@@ -17,30 +17,24 @@
 */
 
 
-#ifndef MALLOCFREE_CU_H
-#define MALLOCFREE_CU_H
+#ifndef hashMap_h_
+#define hashMap_h_
 #include "fs_constants.h"
 #include "fs_structures.cu.h"
+#include "util.cu.h"
 
-#define FREE_LOCKED 1
-#define FREE_UNLOCKED 0
-struct PPool{
+struct HashMap
+{
+	int 				locks[HASH_MAP_SIZE];
+	volatile PFrame*	frames[HASH_MAP_SIZE];
 
-	volatile Page* 	rawStorage;
-	volatile PFrame	frames[PPOOL_FRAMES];
-	volatile uint 	freelist[PPOOL_FRAMES];
+	__device__ void init_thread() volatile;
 
-	volatile uint	lock;
-	volatile uint 	head;
-	volatile uint 	tail;
-	volatile int 	size;
+	__device__ volatile PFrame* readPFrame( int fd, size_t block_id, bool& busy ) volatile;
 
-// MUST be called from a single thread
-	__device__  void init_thread(volatile Page* _storage) volatile;
-
-	__device__ volatile PFrame *allocPage() volatile;
-
-	__device__ void freePage(volatile PFrame* frame, bool lock) volatile ;
+	__device__ volatile PFrame* getPFrame( int fd, size_t block_id ) volatile;
+	
+	__device__ bool removePFrame( PFrame* pframe ) volatile;
 };
 
 #endif

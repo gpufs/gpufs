@@ -21,11 +21,11 @@ CUDA_ROOT:=/usr/local/cuda/
 CUDA_INCLUDE=-I$(CUDA_ROOT)/include -I$(GPUFSLIB) -I$(LIBGPUFSDIR)
 
 ifneq ($(dbg),1)
-	MACROS=-DDEBUG_NOINLINE=""
-	NVCC=$(CUDA_ROOT)/bin/nvcc --generate-code code=sm_35,arch=compute_35 $(CUDA_INCLUDE) $(MACROS) -O2 -maxrregcount 32 
+	MACROS=-DDEBUG_NOINLINE="" -DMALLOC_STATS -DTIMING_STATS
+	NVCC=$(CUDA_ROOT)/bin/nvcc --generate-code code=sm_35,arch=compute_35 $(CUDA_INCLUDE) $(MACROS) -O2 -maxrregcount 32
 	OUTPUTDIR=release
 else
-	MACROS=-DDEBUG_NOINLINE="__noinline__" -DDEBUG  -DMALLOC_STATS
+	MACROS=-DDEBUG_NOINLINE="__noinline__" -DDEBUG -DMALLOC_STATS -DTIMING_STATS
 	NVCC=$(CUDA_ROOT)/bin/nvcc --generate-code code=sm_35,arch=compute_35 $(CUDA_INCLUDE) $(MACROS) -O0 --device-debug --debug -g
 	OUTPUTDIR=debug
 endif
@@ -38,6 +38,7 @@ $(OUTPUTDIR)/fs_calls.o\
 $(OUTPUTDIR)/fs_initializer.o\
 $(OUTPUTDIR)/fs_structures.o\
 $(OUTPUTDIR)/hash_table.o\
+$(OUTPUTDIR)/hashMap.o\
 $(OUTPUTDIR)/mallocfree.o\
 $(OUTPUTDIR)/preclose_table.o\
 $(OUTPUTDIR)/radix_tree.o\
@@ -60,7 +61,7 @@ $(OUTPUTDIR)/timer.o: timer.cpp timer.h | $(OUTPUTDIR)
 	$(CC) timer.cpp -c -o $(OUTPUTDIR)/timer.o
 
 $(OUTPUTDIR)/cpu_ipc.o: cpu_ipc.cu fs_constants.h \
-	util.cu.h  fs_debug.cu.h fs_structures.cu.h radix_tree.cu.h cpu_ipc.cu.h | $(OUTPUTDIR)
+	util.cu.h  fs_debug.cu.h fs_structures.cu.h hashMap.cu.h cpu_ipc.cu.h | $(OUTPUTDIR)
 	$(NVCC) -dc cpu_ipc.cu -o $(OUTPUTDIR)/cpu_ipc.o
 
 $(OUTPUTDIR)/fs_calls.o: fs_calls.cu fs_debug.cu.h fs_constants.h  util.cu.h  cpu_ipc.cu.h fs_structures.cu.h  mallocfree.cu.h \
@@ -68,11 +69,11 @@ $(OUTPUTDIR)/fs_calls.o: fs_calls.cu fs_debug.cu.h fs_constants.h  util.cu.h  cp
 	$(NVCC) -dc fs_calls.cu -o $(OUTPUTDIR)/fs_calls.o
 
 $(OUTPUTDIR)/fs_initializer.o: fs_initializer.cu fs_debug.cu.h fs_constants.h  util.cu.h  cpu_ipc.cu.h fs_structures.cu.h \
-	mallocfree.cu.h  timer.h   hash_table.cu.h radix_tree.cu.h preclose_table.cu.h fs_initializer.cu.h async_ipc.cu.h \
+	mallocfree.cu.h  timer.h   hash_table.cu.h hashMap.cu.h preclose_table.cu.h fs_initializer.cu.h async_ipc.cu.h \
 	generic_ringbuf.cu.h | $(OUTPUTDIR)
 	$(NVCC) -dc fs_initializer.cu -o $(OUTPUTDIR)/fs_initializer.o
 
-$(OUTPUTDIR)/hash_table.o: hash_table.cu hash_table.cu.h fs_constants.h util.cu.h fs_debug.cu.h radix_tree.cu.h \
+$(OUTPUTDIR)/hash_table.o: hash_table.cu hash_table.cu.h fs_constants.h util.cu.h fs_debug.cu.h hashMap.cu.h \
 	fs_structures.cu.h | $(OUTPUTDIR)
 	$(NVCC) -dc hash_table.cu -o $(OUTPUTDIR)/hash_table.o
 
@@ -82,16 +83,16 @@ $(OUTPUTDIR)/mallocfree.o: mallocfree.cu fs_constants.h util.cu.h mallocfree.cu.
 $(OUTPUTDIR)/preclose_table.o: preclose_table.cu.h preclose_table.cu util.cu.h fs_debug.cu.h fs_constants.h | $(OUTPUTDIR)
 	$(NVCC) -dc preclose_table.cu -o $(OUTPUTDIR)/preclose_table.o
 
-$(OUTPUTDIR)/radix_tree.o: radix_tree.cu radix_tree.cu.h fs_constants.h swapper.cu.h util.cu.h fs_debug.cu.h \
+$(OUTPUTDIR)/radix_tree.o: radix_tree.cu hashMap.cu.h fs_constants.h swapper.cu.h util.cu.h fs_debug.cu.h \
 	fs_structures.cu.h | $(OUTPUTDIR)
 	$(NVCC) -dc radix_tree.cu -o $(OUTPUTDIR)/radix_tree.o
 
 $(OUTPUTDIR)/swapper.o: swapper.cu.h swapper.cu fs_structures.cu.h fs_constants.h hash_table.cu.h util.cu.h \
-	fs_debug.cu.h radix_tree.cu.h async_ipc.cu.h generic_ringbuf.cu.h | $(OUTPUTDIR)
+	fs_debug.cu.h hashMap.cu.h async_ipc.cu.h generic_ringbuf.cu.h | $(OUTPUTDIR)
 	$(NVCC)	-dc swapper.cu -o $(OUTPUTDIR)/swapper.o
 
 $(OUTPUTDIR)/fs_structures.o: swapper.cu.h swapper.cu fs_structures.cu.h fs_constants.h hash_table.cu.h util.cu.h \
-	fs_debug.cu.h radix_tree.cu.h | $(OUTPUTDIR)
+	fs_debug.cu.h hashMap.cu.h | $(OUTPUTDIR)
 	$(NVCC)	-dc fs_structures.cu -o $(OUTPUTDIR)/fs_structures.o
 
 $(OUTPUTDIR)/fs_debug.o: fs_debug.cu fs_debug.cu.h | $(OUTPUTDIR)
@@ -102,6 +103,9 @@ $(OUTPUTDIR)/async_ipc.o: util.cu.h fs_debug.cu.h generic_ringbuf.cu.h async_ipc
 
 $(OUTPUTDIR)/generic_ringbuf.o: util.cu.h generic_ringbuf.cu.h generic_ringbuf.cu fs_constants.h | $(OUTPUTDIR)
 	$(NVCC) -dc generic_ringbuf.cu -o $(OUTPUTDIR)/generic_ringbuf.o
+	
+$(OUTPUTDIR)/hashMap.o: hashMap.cu hashMap.cu.h fs_structures.cu.h fs_constants.h util.cu.h | $(OUTPUTDIR)
+	$(NVCC) -dc hashMap.cu -o $(OUTPUTDIR)/hashMap.o
 
 $(OUTPUTDIR)/gpufs_con_lib.o: $(GPUFSLIB)/gpufs_con_lib.cpp $(GPUFSLIB)/gpufs_con_lib.h | $(OUTPUTDIR)
 	$(CC) $(GPUFSLIB)/gpufs_con_lib.cpp -c -o $(OUTPUTDIR)/gpufs_con_lib.o
