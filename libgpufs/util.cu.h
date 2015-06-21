@@ -103,6 +103,13 @@ __forceinline__ __device__ double readNoCache(const volatile double* ptr){
           return val;
 }
 
+__forceinline__ __device__ float readNoCache(const volatile float* ptr){
+          float val;
+      val=*ptr;
+//	asm("ld.cv.f64 %0, [%1];"  : "=d"(val):"l"(ptr));
+          return val;
+}
+
 __forceinline__ __device__ char2 readNoCache(const volatile uchar* ptr){
 	   char2 v;v.x=*ptr; v.y=*(ptr+1); return v;
 //	asm("ld.cv.u16 %0, [%1];"  : "=h"(val2):"l"(ptr));
@@ -178,7 +185,20 @@ __device__ void inline aligned_copy(uchar* dst, volatile uchar* src, int newsize
 		((T*)dst)[tid]=*(((T*)src)+tid);
 		tid+=stride;
 	}
+}
+
+template<typename T>
+__device__ void inline aligned_copy_warp(uchar* dst, volatile uchar* src, int newsize)
+{
+	int warpID = threadIdx.y;
+	int id = threadIdx.x & 0x1f;
+	int stride = 32;
 	
+	while( id < newsize )
+	{
+		((T*)dst)[id] = *(((T*)src)+id);
+		id+=stride;
+	}
 }
 
 __device__
@@ -209,26 +229,26 @@ __forceinline__ __device__ void copy_block(uchar* dst, volatile uchar*src, int s
 	int shift;
 
 	// checking whether the src/dst is 8/4/2 byte aligned
-//	if ((((long)dst)&0xf) == 0 && (((long)src)&0xf) == 0) {
-//		shift = 4;
-//		newsize=size>>shift;
-//		copy_block_16((char*)dst,(char*)src,size);
-//	} else
-//	if ((((long)dst)&0x7) == 0 && (((long)src)&0x7) == 0) {
-//		shift=3;
-//		newsize=size>>shift;
-//		aligned_copy<double>(dst,src,newsize,tid);
-//	} else
-//	if ((((long)dst)&0x3) == 0 && (((long)src)&0x3) == 0) {
-//		shift=2;
-//		newsize=size>>shift;
-//		aligned_copy<float>(dst,src,newsize,tid);
-//	} else
-//	if ((((long)dst)&0x1) == 0 && (((long)src)&0x1) == 0) {
-//		shift=1;
-//		newsize=size>>shift;
-//		aligned_copy<char2>(dst,src,newsize,tid);
-//	} else
+	if ((((long)dst)&0xf) == 0 && (((long)src)&0xf) == 0) {
+		shift = 4;
+		newsize=size>>shift;
+		copy_block_16((char*)dst,(char*)src,size);
+	} else
+	if ((((long)dst)&0x7) == 0 && (((long)src)&0x7) == 0) {
+		shift=3;
+		newsize=size>>shift;
+		aligned_copy<double>(dst,src,newsize,tid);
+	} else
+	if ((((long)dst)&0x3) == 0 && (((long)src)&0x3) == 0) {
+		shift=2;
+		newsize=size>>shift;
+		aligned_copy<float>(dst,src,newsize,tid);
+	} else
+	if ((((long)dst)&0x1) == 0 && (((long)src)&0x1) == 0) {
+		shift=1;
+		newsize=size>>shift;
+		aligned_copy<char2>(dst,src,newsize,tid);
+	} else
 	{
 		shift=0;
 		newsize=size;
@@ -249,6 +269,51 @@ __forceinline__ __device__ void copy_block(uchar* dst, volatile uchar*src, int s
 
 	}
 	__syncthreads();
+}
+
+__forceinline__ __device__ void copy_block_warp(uchar* dst, volatile uchar*src, int size)
+{
+	int newsize;
+	// get the alignment
+	int shift;
+
+	// checking whether the src/dst is 8/4/2 byte aligned
+	if ((((long)dst)&0x7) == 0 && (((long)src)&0x7) == 0) {
+		shift=3;
+		newsize=size>>shift;
+		aligned_copy_warp<double>(dst,src,newsize);
+	} else
+	if ((((long)dst)&0x3) == 0 && (((long)src)&0x3) == 0) {
+		shift=2;
+		newsize=size>>shift;
+		aligned_copy_warp<float>(dst,src,newsize);
+	} else
+	if ((((long)dst)&0x1) == 0 && (((long)src)&0x1) == 0) {
+		shift=1;
+		newsize=size>>shift;
+		aligned_copy_warp<char2>(dst,src,newsize);
+	} else
+	{
+		shift=0;
+		newsize=size;
+		aligned_copy_warp<char>(dst,src,newsize);
+	}
+
+	newsize=newsize<<shift;
+
+	int laneid = threadIdx.x & 0x1f;
+
+	// copying remainders with single thread
+	if( laneid ==0 )
+	{
+		while(newsize<size){
+			char2 r=readNoCache(src+newsize);
+			dst[newsize]=r.x;newsize++;
+			if(newsize<size) dst[newsize]=r.y;
+			newsize++;
+		}
+
+	}
 }
 
 __forceinline__ __device__ void copyNoCache_block(uchar* dst, volatile uchar*src, int size)
@@ -278,6 +343,47 @@ __device__ inline size_t offset2block(size_t offset, int log_blocksize)
 __device__ inline uint offset2blockoffset(size_t offset, int blocksize)
 {
 	return offset&(blocksize-1);
+}
+
+union BroadcastHelper
+{
+	size_t s;
+	void* v;
+	long long l;
+	unsigned long long ul;
+	double d;
+	int i[2];
+};
+
+__device__ inline BroadcastHelper broadcast(BroadcastHelper b)
+{
+	BroadcastHelper t;
+
+	t.i[0] = __shfl( b.i[0], 0 );
+	t.i[1] = __shfl( b.i[1], 0 );
+
+	return t;
+}
+
+__device__ inline int broadcast(int b)
+{
+	b = __shfl( b, 0 );
+
+	return b;
+}
+
+__device__ inline unsigned int broadcast(unsigned int b)
+{
+	b = __shfl( b, 0 );
+
+	return b;
+}
+
+__device__ inline float broadcast(float b)
+{
+	b = __shfl( b, 0 );
+
+	return b;
 }
 
 struct LAST_SEMAPHORE

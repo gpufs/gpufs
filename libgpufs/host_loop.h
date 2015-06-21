@@ -211,7 +211,7 @@ void* rw_task( void* param )
 			if( e->status == CPU_IPC_PENDING )
 			{
 //				std::cout << "Handle request. Worker: " << id << " scratch id: " << scratchIdx << " scratch offset: " << scratchSize
-//						<< " request id: " << firstSlot + i << std::endl;
+//						<< " request id: " << firstSlot + i << " file offset: " << e->file_offset << std::endl;
 
  				e->status = CPU_IPC_IN_PROCESS;
 
@@ -494,9 +494,8 @@ void run_gpufs_handler(volatile GPUGlobals* gpuGlobals, int gpuid)
 
 	totalTime += _timestamp();
 
-	fprintf(stderr, "kernel is complete\n");
-//	fprintf(stderr, "Max pending requests: %d\n", max_req);
-	fprintf(stderr, "Transfer time: %fms\n", totalTime / 1e3);
+//	fprintf(stderr, "kernel is complete\n");
+//	fprintf(stderr, "Transfer time: %fms\n", totalTime / 1e3);
 
 	int totalCount = 0;
 	size_t totalSize = 0;
@@ -504,22 +503,22 @@ void run_gpufs_handler(volatile GPUGlobals* gpuGlobals, int gpuid)
 
 	for (int i = 0; i < RW_HOST_WORKERS; i++)
 	{
-		fprintf(stderr, "Async memcpy [%d]:\n", i);
-		fprintf(stderr, "\tTime: %fms\n", asyncMemCpyTime[i] / 1e3);
-		fprintf(stderr, "\tCount: %d\n", asyncMemCpyCount[i]);
-		fprintf(stderr, "\tSize: %lluMB\n", asyncMemCpySize[i] >> 20);
-//		fprintf(stderr, "\tAverage buffer size: %lluKB\n", (asyncMemCpySize[i] >> 10) / asyncMemCpyCount[i]);
-		fprintf(stderr, "\tBandwidth: %fGB/s\n\n", ((float)asyncMemCpySize[i] / (1 << 30)) / (totalTime / 1e6));
+//		fprintf(stderr, "Async memcpy [%d]:\n", i);
+//		fprintf(stderr, "\tTime: %fms\n", asyncMemCpyTime[i] / 1e3);
+//		fprintf(stderr, "\tCount: %d\n", asyncMemCpyCount[i]);
+//		fprintf(stderr, "\tSize: %lluMB\n", asyncMemCpySize[i] >> 20);
+////		fprintf(stderr, "\tAverage buffer size: %lluKB\n", (asyncMemCpySize[i] >> 10) / asyncMemCpyCount[i]);
+//		fprintf(stderr, "\tBandwidth: %fGB/s\n\n", ((float)asyncMemCpySize[i] / (1 << 30)) / (totalTime / 1e6));
 
 		totalCount += asyncMemCpyCount[i];
 		totalSize += asyncMemCpySize[i];
 	}
 
-	fprintf(stderr, "Async memcpy total:\n");
-	fprintf(stderr, "\tCount: %d\n", totalCount);
-	fprintf(stderr, "\tSize: %lluMB\n", totalSize >> 20);
+//	fprintf(stderr, "Async memcpy total:\n");
+//	fprintf(stderr, "\tCount: %d\n", totalCount);
+//	fprintf(stderr, "\tSize: %lluMB\n", totalSize >> 20);
 //	fprintf(stdout, "\tAverage buffer size: %lluKB\n", (totalSize >> 10) / totalCount);
-	fprintf(stdout, "\tBandwidth: %fGB/s\n\n", ((float)totalSize / (1 << 30)) / (totalTime / 1e6));
+//	fprintf(stdout, "\tBandwidth: %fGB/s\n\n", ((float)totalSize / (1 << 30)) / (totalTime / 1e6));
 }
 
 #endif

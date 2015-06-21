@@ -199,7 +199,7 @@ __device__ void GPU_IPC_RW_Manager::init_thread() volatile
 
 __device__ int GPU_IPC_RW_Manager::findEntry() volatile
 {
-   const int init = blockIdx.x & (RW_IPC_SIZE - 1);
+   const int init = (blockIdx.x + threadIdx.y) & (RW_IPC_SIZE - 1);
    int i;
    // TODO -> lockfree optimization, just attempt to take private TB lock trivial and will work well!!
    i = init; // assuming one concurrent call PER TB
@@ -211,6 +211,7 @@ __device__ int GPU_IPC_RW_Manager::findEntry() volatile
            i = (i + 1) & (RW_IPC_SIZE - 1);
    } while (1);
 }
+
 __device__ void GPU_IPC_RW_Manager::freeEntry(int entry) volatile
 {
    assert(_locker[entry] == IPC_MGR_BUSY);

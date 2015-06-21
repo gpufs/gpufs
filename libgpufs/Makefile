@@ -91,7 +91,7 @@ $(OUTPUTDIR)/swapper.o: swapper.cu.h swapper.cu fs_structures.cu.h fs_constants.
 	fs_debug.cu.h hashMap.cu.h async_ipc.cu.h generic_ringbuf.cu.h | $(OUTPUTDIR)
 	$(NVCC)	-dc swapper.cu -o $(OUTPUTDIR)/swapper.o
 
-$(OUTPUTDIR)/fs_structures.o: swapper.cu.h swapper.cu fs_structures.cu.h fs_constants.h hash_table.cu.h util.cu.h \
+$(OUTPUTDIR)/fs_structures.o: fs_structures.cu fs_structures.cu.h swapper.cu.h swapper.cu fs_constants.h hash_table.cu.h util.cu.h \
 	fs_debug.cu.h hashMap.cu.h | $(OUTPUTDIR)
 	$(NVCC)	-dc fs_structures.cu -o $(OUTPUTDIR)/fs_structures.o
 

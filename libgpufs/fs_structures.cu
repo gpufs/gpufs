@@ -223,7 +223,7 @@ DEBUG_NOINLINE __device__ int OTable::findEntry( volatile const char* filename, 
 
 	for( int i = 0; i < FSTABLE_SIZE; i++ )
 	{
-		if( entries[i].status == FSENTRY_EMPTY )
+		if( (found == E_FSTABLE_FULL) && (entries[i].status == FSENTRY_EMPTY) )
 		{
 			found = i;
 		}
