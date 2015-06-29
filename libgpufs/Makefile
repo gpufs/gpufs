@@ -65,7 +65,7 @@ $(OUTPUTDIR)/cpu_ipc.o: cpu_ipc.cu fs_constants.h \
 	$(NVCC) -dc cpu_ipc.cu -o $(OUTPUTDIR)/cpu_ipc.o
 
 $(OUTPUTDIR)/fs_calls.o: fs_calls.cu fs_debug.cu.h fs_constants.h  util.cu.h  cpu_ipc.cu.h fs_structures.cu.h  mallocfree.cu.h \
-	timer.h   hash_table.cu.h | $(OUTPUTDIR)
+	timer.h   hash_table.cu.h fat_pointer.cu.h | $(OUTPUTDIR)
 	$(NVCC) -dc fs_calls.cu -o $(OUTPUTDIR)/fs_calls.o
 
 $(OUTPUTDIR)/fs_initializer.o: fs_initializer.cu fs_debug.cu.h fs_constants.h  util.cu.h  cpu_ipc.cu.h fs_structures.cu.h \

@@ -190,7 +190,6 @@ __device__ void inline aligned_copy(uchar* dst, volatile uchar* src, int newsize
 template<typename T>
 __device__ void inline aligned_copy_warp(uchar* dst, volatile uchar* src, int newsize)
 {
-	int warpID = threadIdx.y;
 	int id = threadIdx.x & 0x1f;
 	int stride = 32;
 	

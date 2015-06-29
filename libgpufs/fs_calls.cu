@@ -31,6 +31,7 @@
 #include "fs_globals.cu.h"
 #include "preclose_table.cu.h"
 #include "fs_calls.cu.h"
+#include "fat_pointer.cu.h"
 // no reference counting here
 
 // we must have multiple threads otherwise it 
@@ -542,6 +543,5 @@ DEBUG_NOINLINE __device__ volatile void* gmmap( void *addr, size_t size, int pro
 
 	return (void*) ( ( (uchar*) ( pframe->page ) ) + block_offset );
 }
-
 
 #endif
