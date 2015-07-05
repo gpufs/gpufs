@@ -23,6 +23,7 @@
 
 // Prevent circular include
 __device__ volatile void* gmmap(void *addr, size_t size, int prot, int flags, int fd, off_t offset);
+__device__ int gmunmap( volatile void *addr, size_t length );
 
 static const int VPAGE_BITS = 28;
 static const int FID_BITS = 4;
@@ -286,7 +287,15 @@ public:
 						else
 						{
 							// We locked the page, now we can do whatever we want
-							volatile void* ptr = gmmap(NULL, FS_BLOCKSIZE, 0, m_flags, m_fid, query << FS_LOGBLOCKSIZE);
+							// First check if we are evicting an existing map
+							if( line.fid != -1 )
+							{
+								int oldPhysical = line.physicalPage;
+								volatile void* ptr = m_mem + ((size_t)oldPhysical << FS_LOGBLOCKSIZE);
+								gmunmap( ptr, FS_BLOCKSIZE );
+							}
+
+							volatile void* ptr = gmmap(NULL, FS_BLOCKSIZE, 0, m_flags, m_fid, (size_t)query << FS_LOGBLOCKSIZE);
 
 							physical = ((size_t)ptr - (size_t)m_mem) >> FS_LOGBLOCKSIZE;
 

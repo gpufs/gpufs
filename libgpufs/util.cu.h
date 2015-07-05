@@ -42,6 +42,7 @@
 
 #define MUTEX_LOCK(lock) while (atomicExch((int*)(&(lock)),1));
 #define MUTEX_WAS_LOCKED(lock) atomicExch((int*)(&(lock)),1)
+#define MUTEX_TRY_LOCK(lock) (!atomicExch((int*)(&(lock)),1))
 
 #define MUTEX_UNLOCK(lock) { atomicExch((int*)(&(lock)),0);}
 
@@ -50,6 +51,7 @@
 #define END_SINGLE_THREAD  } __syncthreads();
 
 #define TID (threadIdx.x+threadIdx.y*blockDim.x+threadIdx.z*blockDim.x*blockDim.y)
+#define LANE_ID (TID & 0x1f)
 //#define TID (threadIdx.x)
 	
 	

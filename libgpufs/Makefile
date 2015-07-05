@@ -77,7 +77,7 @@ $(OUTPUTDIR)/hash_table.o: hash_table.cu hash_table.cu.h fs_constants.h util.cu.
 	fs_structures.cu.h | $(OUTPUTDIR)
 	$(NVCC) -dc hash_table.cu -o $(OUTPUTDIR)/hash_table.o
 
-$(OUTPUTDIR)/mallocfree.o: mallocfree.cu fs_constants.h util.cu.h mallocfree.cu.h fs_structures.cu.h swapper.cu.h | $(OUTPUTDIR)
+$(OUTPUTDIR)/mallocfree.o: mallocfree.cu fs_constants.h util.cu.h mallocfree.cu.h fs_structures.cu.h swapper.cu.h fs_debug.cu.h | $(OUTPUTDIR)
 	$(NVCC) -dc mallocfree.cu -o $(OUTPUTDIR)/mallocfree.o
 
 $(OUTPUTDIR)/preclose_table.o: preclose_table.cu.h preclose_table.cu util.cu.h fs_debug.cu.h fs_constants.h | $(OUTPUTDIR)

@@ -277,7 +277,7 @@ DEBUG_NOINLINE __device__ volatile PFrame* getRwLockedPage( int fd, size_t block
 	return pframe;
 }
 
-DEBUG_NOINLINE __device__ int gmunmap( volatile void *addr, size_t length )
+DEBUG_NOINLINE __device__ int gmunmap_threadblock( volatile void *addr, size_t length )
 {
 	size_t tmp = ( (char*) addr ) - ( (char*) g_ppool->rawStorage );
 	size_t offset = tmp >> FS_LOGBLOCKSIZE;
@@ -291,6 +291,25 @@ DEBUG_NOINLINE __device__ int gmunmap( volatile void *addr, size_t length )
 		p->unlock_rw();
 
 	END_SINGLE_THREAD
+
+	return 0;
+}
+
+DEBUG_NOINLINE __device__ int gmunmap( volatile void *addr, size_t length )
+{
+	size_t tmp = ( (char*) addr ) - ( (char*) g_ppool->rawStorage );
+	size_t offset = tmp >> FS_LOGBLOCKSIZE;
+	if( offset >= PPOOL_FRAMES )
+		return -1;
+
+	__threadfence(); // make sure all writes to the page become visible
+	int laneid = threadIdx.x & 0x1f;
+
+	if( laneid == 0 )
+	{
+		volatile PFrame* p = &( g_ppool->frames[offset] );
+		p->unlock_rw();
+	}
 
 	return 0;
 }

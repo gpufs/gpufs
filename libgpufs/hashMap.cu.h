@@ -34,7 +34,7 @@ struct HashMap
 
 	__device__ volatile PFrame* getPFrame( int fd, size_t block_id ) volatile;
 	
-	__device__ bool removePFrame( PFrame* pframe ) volatile;
+	__device__ bool removePFrame( volatile PFrame* pframe ) volatile;
 };
 
 #endif

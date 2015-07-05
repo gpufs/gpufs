@@ -22,7 +22,39 @@
 #include <stdint.h>
 #include <stdio.h>
 
-#if 1
+#ifdef DEBUG
+
+struct gdebug_t;
+extern            volatile struct gdebug_t *_hdbg;
+extern __device__ volatile struct gdebug_t *_gdbg;
+extern __device__ volatile int             _gdbg_mutex;
+
+__host__ void _gdebug_init(void);
+
+__device__ void _dbg(const char *s,
+                       void* ptr,
+                       size_t v,
+                       long int t,
+                       long int l,
+                       const char *fname,
+                       const char *func);
+
+#define DBGT(s, ptr, v, t) _dbg(s, ptr, v, t, __LINE__, __FILE__, __func__)
+#define DBG_INIT() _gdebug_init()
+
+#else
+
+#define DBGT(s, ptr, v, t)
+#define DBG_INIT()
+
+#endif
+
+#define GDBG(s, ptr, v) DBGT(s, ptr, v, 0)
+#define GDBGS(s) GDBG(s, (void*)-1, -1)
+#define GDBGL() GDBG("", (void*)-1, -1)
+#define GDBGV(s, v) GDBG(s, (void*)-1, v)
+
+#if DEBUG
 #define PRINT(...) \
 	if( (threadIdx.x + threadIdx.y + threadIdx.z) ==0 ) \
 	{ \
@@ -30,30 +62,6 @@
 	}
 #else
 #define PRINT(...)
-#endif
-
-#if 0
-#define DEBUG_BUF_SIZE 10240
-
-__device__ char debug_buffer[DEBUG_BUF_SIZE];
-__device__ int debug_buffer_ptr;
-
-#define INIT_DEBUG debug_buffer_ptr=0; debug_buffer[0]='\0';
-
-#define WRITE_DEBUG(file,line)  { int l=line; int old=atomicAdd(&debug_buffer_ptr,20); \
-						   for( int i=0;i<5;i++,old++)\
-						   {debug_buffer[old]=file[i];}\
-						    debug_buffer[old]='\0';\
-						    for (int i=0;i<14&&line>0;i++,old++){\
-							debug_buffer[old]=(l&0x1?'1':'0');\
-							l=l>>1;  }\
-						        debug_buffer[old]='\n';\
-							__threadfence();}
-
-#define PRINT_DEBUG  unsigned char tmp[DEBUG_BUF_SIZE]={0}; void *buf_ptr; \
-		      cudaGetSymbolAddress(&buf_ptr,debug_buffer);\
-		      cudaMemcpy((void*)tmp,buf_ptr,sizeof(char)*DEBUG_BUF_SIZE,cudaMemcpyDeviceToHost);\
-			     fprintf(stderr,"%s \n", tmp);
 #endif
 
 #define PRINT_STATS(SYMBOL) { unsigned int tmp;\
@@ -208,8 +216,8 @@ extern __device__ unsigned long long FileOpenTime;
 extern __device__ unsigned long long CPUReadTime;
 extern __device__ unsigned long long HashMapSearchTime;
 
-#define PRINT_TIME(SYMBOL, freq, blocks) { unsigned long long tmp;\
-			     cudaMemcpyFromSymbol(&tmp,SYMBOL,sizeof(unsigned long long),0,cudaMemcpyDeviceToHost);\
+#define PRINT_TIME(SYMBOL, freq, blocks) { unsigned long long tmp; \
+			     cudaMemcpyFromSymbol(&tmp,SYMBOL,sizeof(unsigned long long),0,cudaMemcpyDeviceToHost); \
 			     fprintf(stderr,"%s %fms\n", #SYMBOL, ((double)(tmp) / 1e6) / (double)(blocks)); }
 
 #define GET_TIME(timer) \
@@ -217,14 +225,29 @@ extern __device__ unsigned long long HashMapSearchTime;
 
 #define START(timer) \
 	unsigned long long timer##Start; \
-	if( threadIdx.x + threadIdx.y + threadIdx.z == 0 ) \
+	if( TID == 0 ) \
+	{ \
+		GET_TIME( timer##Start ); \
+	}
+
+#define START_WARP(timer) \
+	unsigned long long timer##Start; \
+	if( LANE_ID == 0 ) \
 	{ \
 		GET_TIME( timer##Start ); \
 	}
 
 #define STOP(timer) \
 	unsigned long long timer##Stop; \
-	if( threadIdx.x + threadIdx.y + threadIdx.z == 0 ) \
+	if( TID == 0 ) \
+	{ \
+		GET_TIME( timer##Stop ); \
+		atomicAdd(&timer##Time, timer##Stop - timer##Start); \
+	}
+
+#define STOP_WARP(timer) \
+	unsigned long long timer##Stop; \
+	if( LANE_ID == 0 ) \
 	{ \
 		GET_TIME( timer##Stop ); \
 		atomicAdd(&timer##Time, timer##Stop - timer##Start); \
@@ -255,6 +278,9 @@ extern __device__ unsigned long long HashMapSearchTime;
 
 #define PAGE_ALLOC_START START( PageAlloc )
 #define PAGE_ALLOC_STOP STOP( PageAlloc )
+
+#define PAGE_ALLOC_START_WARP START_WARP( PageAlloc )
+#define PAGE_ALLOC_STOP_WARP STOP_WARP( PageAlloc )
 
 #define FILE_OPEN_START START( FileOpen )
 #define FILE_OPEN_STOP STOP( FileOpen )
@@ -302,8 +328,8 @@ extern __device__ unsigned long long HashMapSearchTime;
 #define COPY_BLOCK_START
 #define COPY_BLOCK_STOP
 
-#define PAGE_ALLOC_START
-#define PAGE_ALLOC_STOP
+#define PAGE_ALLOC_START_WARP
+#define PAGE_ALLOC_STOP_WARP
 
 #define FILE_OPEN_START
 #define FILE_OPEN_STOP

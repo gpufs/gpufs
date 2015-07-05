@@ -44,6 +44,7 @@ __device__ int gclose(int fd);
 __device__ int gopen(const char* filename, int flags);
 __device__ int gmsync(volatile void *addr, size_t length,int flags);
 __device__ int gmunmap(volatile void *addr, size_t length);
+__device__ int gmunmap_threadblock( volatile void *addr, size_t length );
 __device__ volatile void* gmmap(void *addr, size_t size,
 		int prot, int flags, int fd, off_t offset);
 __device__ volatile void* gmmap_threadblock(void *addr, size_t size,

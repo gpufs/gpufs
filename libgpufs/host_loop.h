@@ -248,6 +248,10 @@ void* rw_task( void* param )
 							req_file_offset );
 					nvtxRangePop();
 
+					if( cpu_read_size <= 0 )
+					{
+						printf("fid: %d, size: %ld, offset: %ld\n", req_cpu_fd, req_size, req_file_offset);
+					}
 					assert( cpu_read_size > 0 );
 
 					e->return_size = cpu_read_size;

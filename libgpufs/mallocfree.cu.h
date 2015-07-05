@@ -28,9 +28,9 @@ struct PPool{
 
 	volatile Page* 	rawStorage;
 	volatile PFrame	frames[PPOOL_FRAMES];
-	volatile uint 	freelist[PPOOL_FRAMES];
+	volatile uint 	freeList[PPOOL_FRAMES];
 
-	volatile uint	lock;
+	volatile uint	swapLock;
 	volatile uint 	head;
 	volatile uint 	tail;
 	volatile int 	size;
@@ -40,7 +40,7 @@ struct PPool{
 
 	__device__ volatile PFrame *allocPage() volatile;
 
-	__device__ void freePage(volatile PFrame* frame, bool lock) volatile ;
+	__device__ void freePage(volatile PFrame* frame) volatile ;
 };
 
 #endif
