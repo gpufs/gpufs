@@ -17,8 +17,9 @@ LIBGPUFSDIR?=.
 INSTALLDIR?=..
 
 GPUFSLIB=$(LIBGPUFSDIR)/../gpufs_con_lib.user/
+DONARDLIB=/home/sagi/ASPLOS16/donard/
 CUDA_ROOT:=/usr/local/cuda/
-CUDA_INCLUDE=-I$(CUDA_ROOT)/include -I$(GPUFSLIB) -I$(LIBGPUFSDIR)
+CUDA_INCLUDE=-I$(CUDA_ROOT)/include -I$(GPUFSLIB) -I$(LIBGPUFSDIR) -I$(DONARDLIB)
 
 ifneq ($(dbg),1)
 	MACROS=-DDEBUG_NOINLINE="" -DMALLOC_STATS -DTIMING_STATS
@@ -51,10 +52,12 @@ $(OUTPUTDIR)/gpufs_con_lib.o\
 
 ifneq ($(dbg),1)
 $(OUTPUTDIR)/libgpufs.a : $(GPUFS_SOURCES) | $(OUTPUTDIR)
-	ar ru $(OUTPUTDIR)/libgpufs.a $(GPUFS_SOURCES)
+	ar -x $(DONARDLIB)/libdonard.a
+	ar ru $(OUTPUTDIR)/libgpufs.a $(GPUFS_SOURCES) *.o
 else
 $(OUTPUTDIR)/libgpufsd.a: $(GPUFS_SOURCES) | $(OUTPUTDIR)
-	ar ru $(OUTPUTDIR)/libgpufsd.a $(GPUFS_SOURCES)
+	ar -x $(DONARDLIB)/libdonard.a
+	ar ru $(OUTPUTDIR)/libgpufsd.a $(GPUFS_SOURCES) *.o
 endif
 
 $(OUTPUTDIR)/timer.o: timer.cpp timer.h | $(OUTPUTDIR)

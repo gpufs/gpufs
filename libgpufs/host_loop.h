@@ -35,9 +35,27 @@
 #include <nvToolsExt.h>
 
 #include "fs_initializer.cu.h"
-//#include "gpufs_con_lib.h"
 
-#define TRACE std::cout << __FILE__ << ":" << __LINE__ << std::endl;
+#ifdef TRACE
+
+#define PRINT_TRACE(...) fprintf(stderr, __VA_ARGS__);
+
+#else
+
+#define PRINT_TRACE(...)
+
+#endif
+
+#ifdef TIMING_STATS
+
+#define PRINT_TIMES(...) fprintf(stderr, __VA_ARGS__);
+
+#else
+
+#define PRINT_TIMES(...)
+
+#endif
+
 
 void fd2name(const int fd, char* name, int namelen)
 {
@@ -52,19 +70,16 @@ void fd2name(const int fd, char* name, int namelen)
 		name[s] = '\0';
 }
 
-double transfer_time = 0;
 double asyncMemCpyTime[RW_HOST_WORKERS] = {0};
 int asyncMemCpyCount[RW_HOST_WORKERS] = {0};
 size_t asyncMemCpySize[RW_HOST_WORKERS] = {0};
-
-bool debug_expecting_close = 0;
 
 double total_stat = 0;
 double total_stat1 = 0;
 
 volatile int done = 0;
 
-volatile int writeRequests[RW_HOST_WORKERS] = {0};
+volatile int readRequests[RW_HOST_WORKERS] = {0};
 volatile int activeEntries[RW_HOST_WORKERS][RW_SCRATCH_PER_WORKER][RW_SLOTS_PER_WORKER] = {0};
 
 pthread_mutex_t rwLoopTasksLocks[RW_HOST_WORKERS];
@@ -74,8 +89,8 @@ void* memoryMenager( void* param )
 {
 	TaskData* taskData = (TaskData*)param;
 
-	int gpuid = taskData->gpuid;
-	int id = taskData->id;
+//	int gpuid = taskData->gpuid;
+//	int id = taskData->id;
 	volatile GPUGlobals* globals = taskData->gpuGlobals;
 	int currentScratchIDs[RW_HOST_WORKERS] = {0};
 	int lastScratchIDs[RW_HOST_WORKERS] = {0};
@@ -112,14 +127,14 @@ void* memoryMenager( void* param )
 				{
 					asyncMemCpyTime[i] += _timestamp();
 
-//					std::cout << "Finished event[" << i << "][" << lastScratchIDs[i] << "]" << std::endl;
+					PRINT_TRACE( "Finished event[%d][%d]\n", i, lastScratchIDs[i] );
 
 					// complete the request
 					for( int k = 0; k < RW_SLOTS_PER_WORKER; ++k )
 					{
 						if( activeEntries[i][lastScratchIDs[i]][k] != 0 )
 						{
-//							std::cout << "Notifying request complete[" << firstSlot + k << "]" << std::endl;
+							PRINT_TRACE( "Notifying request complete[%d]\n", firstSlot + k );
 							globals->cpu_ipcRWQueue->entries[ firstSlot + k ].status = CPU_IPC_READY;
 							activeEntries[i][lastScratchIDs[i]][k] = 0;
 						}
@@ -143,21 +158,21 @@ void* memoryMenager( void* param )
 				continue;
 			}
 
-			int writeReq = writeRequests[i];
+			int readReq = readRequests[i];
 
-			if( writeReq == 0 )
+			if( readReq == 0 )
 			{
 				continue;
 			}
 
-//			std::cout << "Got request. Worker: " << i << std::endl;
+			PRINT_TRACE( "Got request from worker: %d\n", i );
 
 			// Handle new requests
-			if( writeReq > 0 )
+			if( readReq > 0 )
 			{
 				asyncMemCpyTime[i] -= _timestamp();
 
-				writeRequests[i] = 0;
+				readRequests[i] = 0;
 
 				// Notify the rw loop that we've read the request
 				pthread_mutex_lock( &rwLoopTasksLocks[i] );
@@ -165,12 +180,13 @@ void* memoryMenager( void* param )
 				pthread_mutex_unlock( &rwLoopTasksLocks[i] );
 
 				CUDA_SAFE_CALL(
-						cudaMemcpyAsync( ( (char* ) globals->stagingArea[i][currentScratchIDs[i]] ), globals->streamMgr->scratch[i][currentScratchIDs[i]], writeReq,
+						cudaMemcpyAsync( getStagingAreaOffset( globals->stagingArea, i, currentScratchIDs[i]),
+								globals->streamMgr->scratch[i][currentScratchIDs[i]], readReq,
 								cudaMemcpyHostToDevice, globals->streamMgr->memStream[i] ) );
 
 				CUDA_SAFE_CALL( cudaEventRecord( events[i][currentScratchIDs[i]], globals->streamMgr->memStream[i]));
 
-//				std::cout << "Recording event[" << i << "][" << currentScratchIDs[i] << "]" << std::endl;
+				PRINT_TRACE( "Recording event[%d][%d]\n", i, currentScratchIDs[i] );
 
 				currentScratchIDs[i]++;
 				if( RW_SCRATCH_PER_WORKER == currentScratchIDs[i] )
@@ -180,6 +196,8 @@ void* memoryMenager( void* param )
 			}
 		}
 	}
+
+	return NULL;
 }
 
 void* rw_task( void* param )
@@ -210,15 +228,14 @@ void* rw_task( void* param )
 			volatile CPU_IPC_RW_Entry* e = entries[i];
 			if( e->status == CPU_IPC_PENDING )
 			{
-//				std::cout << "Handle request. Worker: " << id << " scratch id: " << scratchIdx << " scratch offset: " << scratchSize
-//						<< " request id: " << firstSlot + i << " file offset: " << e->file_offset << std::endl;
+				PRINT_TRACE("Handle request in worker: %d, scratch id: %d, scratch offset: %ld, request id: %d, file offset: %ld\n",
+						id, scratchIdx, scratchSize, firstSlot + i, e->file_offset);
 
  				e->status = CPU_IPC_IN_PROCESS;
 
 				while( globals->cpu_ipcRWFlags->entries[id][scratchIdx] != 0 )
 				{
-//					std::cout << "Waiting. Worker: " << id << " scratch id: " << scratchIdx << " status: " << globals->cpu_ipcRWFlags->entries[id][scratchIdx] << std::endl;
-//					TRACE
+					PRINT_TRACE( "Waiting in worker: %d, scratch id: %d, status: %d\n", id, scratchIdx, globals->cpu_ipcRWFlags->entries[id][scratchIdx] );
 					usleep(0);
 				}
 
@@ -243,15 +260,9 @@ void* rw_task( void* param )
 					// read
 					int cpu_read_size = 0;
 
-					nvtxRangePushA( "pread" );
 					cpu_read_size = pread( req_cpu_fd, globals->streamMgr->scratch[id][scratchIdx] + scratchSize, req_size,
 							req_file_offset );
-					nvtxRangePop();
 
-					if( cpu_read_size <= 0 )
-					{
-						printf("fid: %d, size: %ld, offset: %ld\n", req_cpu_fd, req_size, req_file_offset);
-					}
 					assert( cpu_read_size > 0 );
 
 					e->return_size = cpu_read_size;
@@ -262,14 +273,13 @@ void* rw_task( void* param )
 					activeEntries[id][scratchIdx][i] = 1;
 					scratchSize += cpu_read_size;
 					numRequests++;
-				}
+
 					break;
+				}
 
 				default:
 					assert( NULL );
 				}
-				nvtxRangePop();
-				asyncMemCpyTime[id] += _timestamp();
 			}
 		}
 
@@ -287,8 +297,8 @@ void* rw_task( void* param )
 
 		pthread_mutex_lock( &rwLoopTasksLocks[id] );
 
-		writeRequests[id] = scratchSize;
-//		std::cout << "Pass request. Worker: " << id << std::endl;
+		readRequests[id] = scratchSize;
+		PRINT_TRACE( "Send request from worker: %d\n", id );
 
 		pthread_cond_wait( &rwLoopTasksConds[id], &rwLoopTasksLocks[id]);
 		pthread_mutex_unlock( &rwLoopTasksLocks[id] );
@@ -335,13 +345,11 @@ void* open_task( void* param )
 				struct stat s;
 				if (e->do_not_open)
 				{
-
 					if (stat(filename, &s) < 0)
 					{
 						fprintf(stderr, " problem with STAT file %s on CPU: %s\n",
 								filename, strerror(errno));
 					}
-					//	fprintf(stderr,"Do not open for inode %d, time %d\n",s.st_ino, s.st_mtime);
 				}
 				else
 				{
@@ -368,8 +376,6 @@ void* open_task( void* param )
 					}
 				}
 
-				//fprintf(stderr, "FD %d,  inode %ld, size %ld, Found file %s\n",i, s.st_ino, s.st_size, filename);
-
 				e->cpu_fd = cpu_fd;
 				e->flush_cache = pageflush;
 				e->cpu_inode = s.st_ino;
@@ -384,8 +390,6 @@ void* open_task( void* param )
 			{
 				double vvvv1 = _timestamp();
 				// do close
-				// fprintf(stderr, "FD %d, closing file %s\n",i, e->filename);
-
 				if (use_gpufs_lib)
 				{
 					if (e->is_dirty)
@@ -415,24 +419,21 @@ void* open_task( void* param )
 			}
 
 		}
-
-
 	}
 
 	return NULL;
 }
 
-Page diff_page;
-
-int max_req = 0;
-int report = 0;
-
-
-
-
 void run_gpufs_handler(volatile GPUGlobals* gpuGlobals, int gpuid)
 {
 	done = 0;
+
+	for( int i = 0; i < RW_HOST_WORKERS; ++i )
+	{
+		asyncMemCpyTime[i] = 0;
+		asyncMemCpyCount[i] = 0;
+		asyncMemCpySize[i] = 0;
+	}
 
 	double totalTime = 0;
 
@@ -453,16 +454,11 @@ void run_gpufs_handler(volatile GPUGlobals* gpuGlobals, int gpuid)
 
 	memoryMenagerData.gpuGlobals = gpuGlobals;
 
-//	pthread_create( &memoryMenagerID, &attr, memoryMenager, &memoryMenagerData );
-
 	for( int i = 0; i < RW_HOST_WORKERS; ++i )
 	{
 		rwLoopTasksData[i].id = i;
 		rwLoopTasksData[i].gpuGlobals =  gpuGlobals;
 		rwLoopTasksData[i].gpuid = 0;
-
-//		rwLoopTasksConds[i] = {0};
-//		rwLoopTasksLocks[i] = {0};
 
 		pthread_create( (pthread_t*)&(rwLoopTasksIDs[i]), &attr, rw_task, (TaskData*)&(rwLoopTasksData[i]) );
 	}
@@ -480,12 +476,6 @@ void run_gpufs_handler(volatile GPUGlobals* gpuGlobals, int gpuid)
 
 	memoryMenager( &memoryMenagerData );
 
-//	CUDA_SAFE_CALL(
-//		cudaStreamSynchronize( gpuGlobals->streamMgr->kernelStream ));
-//	done = 1;
-//
-//	pthread_join( memoryMenagerID, NULL );
-
 	for( int i = 0; i < 1; ++i )
 	{
 		pthread_join( openLoopTasksIDs[i], NULL );
@@ -498,8 +488,7 @@ void run_gpufs_handler(volatile GPUGlobals* gpuGlobals, int gpuid)
 
 	totalTime += _timestamp();
 
-//	fprintf(stderr, "kernel is complete\n");
-//	fprintf(stderr, "Transfer time: %fms\n", totalTime / 1e3);
+	fprintf(stderr, "Transfer time: %fms\n", totalTime / 1e3);
 
 	int totalCount = 0;
 	size_t totalSize = 0;
@@ -507,22 +496,36 @@ void run_gpufs_handler(volatile GPUGlobals* gpuGlobals, int gpuid)
 
 	for (int i = 0; i < RW_HOST_WORKERS; i++)
 	{
-//		fprintf(stderr, "Async memcpy [%d]:\n", i);
-//		fprintf(stderr, "\tTime: %fms\n", asyncMemCpyTime[i] / 1e3);
-//		fprintf(stderr, "\tCount: %d\n", asyncMemCpyCount[i]);
-//		fprintf(stderr, "\tSize: %lluMB\n", asyncMemCpySize[i] >> 20);
-////		fprintf(stderr, "\tAverage buffer size: %lluKB\n", (asyncMemCpySize[i] >> 10) / asyncMemCpyCount[i]);
-//		fprintf(stderr, "\tBandwidth: %fGB/s\n\n", ((float)asyncMemCpySize[i] / (1 << 30)) / (totalTime / 1e6));
+		PRINT_TIMES( "Async memcpy [%d]:\n", i );
+		PRINT_TIMES( "\tTime: %fms\n", asyncMemCpyTime[i] / 1e3);
+		PRINT_TIMES( "\tCount: %d\n", asyncMemCpyCount[i]);
+		PRINT_TIMES( "\tSize: %lluMB\n", asyncMemCpySize[i] >> 20);
+		if( asyncMemCpyCount[i] > 0 )
+		{
+			PRINT_TIMES( "\tAverage buffer size: %lluKB\n", (asyncMemCpySize[i] >> 10) / asyncMemCpyCount[i]);
+		}
+		else
+		{
+			PRINT_TIMES( "\tAverage buffer size: 0KB\n");
+		}
+		PRINT_TIMES( "\tBandwidth: %fGB/s\n\n", ((float)asyncMemCpySize[i] / (1 << 30)) / (totalTime / 1e6));
 
 		totalCount += asyncMemCpyCount[i];
 		totalSize += asyncMemCpySize[i];
 	}
 
-//	fprintf(stderr, "Async memcpy total:\n");
-//	fprintf(stderr, "\tCount: %d\n", totalCount);
-//	fprintf(stderr, "\tSize: %lluMB\n", totalSize >> 20);
-//	fprintf(stdout, "\tAverage buffer size: %lluKB\n", (totalSize >> 10) / totalCount);
-//	fprintf(stdout, "\tBandwidth: %fGB/s\n\n", ((float)totalSize / (1 << 30)) / (totalTime / 1e6));
+	PRINT_TIMES( "Async memcpy total:\n");
+	PRINT_TIMES( "\tCount: %d\n", totalCount);
+	PRINT_TIMES( "\tSize: %lluMB\n", totalSize >> 20);
+	if( totalCount > 0 )
+	{
+		PRINT_TIMES( "\tAverage buffer size: %lluKB\n", (totalSize >> 10) / totalCount);
+	}
+	else
+	{
+		PRINT_TIMES( "\tAverage buffer size: 0KB\n");
+	}
+	PRINT_TIMES( "\tBandwidth: %fGB/s\n\n", ((float)totalSize / (1 << 30)) / (totalTime / 1e6));
 }
 
 #endif

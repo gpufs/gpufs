@@ -118,6 +118,9 @@ struct TaskData
 	volatile GPUGlobals* gpuGlobals;
 };
 
+#define getStagingAreaOffset(stagingArea, i, j) \
+	(stagingArea + i * RW_SCRATCH_PER_WORKER * FS_BLOCKSIZE * RW_SLOTS_PER_WORKER + j * FS_BLOCKSIZE * RW_SLOTS_PER_WORKER)
+
 struct GPUGlobals{
 	volatile CPU_IPC_OPEN_Queue* cpu_ipcOpenQueue;
 	
@@ -136,7 +139,7 @@ struct GPUGlobals{
 // Raw memory pool
 	Page* rawStorage;
 // Device memory staging area
-	Page* stagingArea[RW_HOST_WORKERS][RW_SCRATCH_PER_WORKER];
+	uchar* stagingArea;
 // gpufs device file decsriptor
         int gpufs_fd;
 // hashMap for the buffer cache frames
@@ -179,6 +182,8 @@ struct GPUGlobals{
 		CUDA_SAFE_CALL(cudaMemcpy(async_close_rb_gpu,async_close_rb,sizeof(async_close_rb_t),cudaMemcpyHostToDevice));
 		CUDA_SAFE_CALL(cudaMemcpyToSymbol(g_async_close_rb,&async_close_rb_gpu,sizeof(void*))); 
 		
+		CUDA_SAFE_CALL(cudaMalloc(&stagingArea,
+				sizeof(uchar) * RW_HOST_WORKERS * RW_SCRATCH_PER_WORKER * FS_BLOCKSIZE * RW_SLOTS_PER_WORKER));
 
 		streamMgr=new GPUStreamManager();
 		gpufs_fd=-1;
@@ -189,14 +194,6 @@ struct GPUGlobals{
 			}
                 }else{
 //			fprintf(stderr,"Warning: GPUFS device was not enabled through USE_GPUFS_DEVICE environment variable\n");
-		}
-
-		for( int i = 0; i < RW_HOST_WORKERS; ++i )
-		{
-			for( int j = 0; j < RW_SCRATCH_PER_WORKER; ++j )
-			{
-				CUDA_SAFE_CALL( cudaMalloc(&stagingArea[i][j], sizeof(Page) * RW_SLOTS_PER_WORKER) );
-			}
 		}
 	}
 	

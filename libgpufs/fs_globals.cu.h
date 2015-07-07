@@ -58,6 +58,6 @@ extern __device__ volatile HashMap* g_hashMap;
 // file_id unique counter
 extern __device__ int g_file_id;
 
-extern __device__ volatile void* g_stagingArea[RW_HOST_WORKERS][RW_SCRATCH_PER_WORKER];
+extern __device__ volatile uchar* g_stagingArea[RW_HOST_WORKERS][RW_SCRATCH_PER_WORKER];
 
 #endif

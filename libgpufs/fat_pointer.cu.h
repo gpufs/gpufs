@@ -25,10 +25,13 @@
 __device__ volatile void* gmmap(void *addr, size_t size, int prot, int flags, int fd, off_t offset);
 __device__ int gmunmap( volatile void *addr, size_t length );
 
-static const int VPAGE_BITS = 28;
-static const int FID_BITS = 4;
-static const int REF_COUNT_BITS = 64 - FID_BITS - VPAGE_BITS - (32 - FS_LOGBLOCKSIZE);
-static const int FFU_BITS = 32 - 1 - VPAGE_BITS;
+static const unsigned int FID_BITS = 4;
+static const unsigned int VPAGE_BITS = 28;
+static const unsigned int REF_COUNT_BITS = 64 - FID_BITS - VPAGE_BITS - (32 - FS_LOGBLOCKSIZE);
+static const unsigned int FFU_BITS = 32 - 1 - VPAGE_BITS;
+
+static const unsigned int INVALID_VPAGE = (1 << VPAGE_BITS) - 1;
+static const unsigned int INVALID_FID = (1 << FID_BITS) - 1;
 
 struct __align__(8) _FatPtr
 {
@@ -55,13 +58,16 @@ struct TLB
 
 	__device__ TLB()
 	{
-		for( int i = 0; i < N; ++i )
+		if( TID == 0 )
 		{
-			lines[i].refCount = 0;
-			lines[i].physicalPage = 0;
-			lines[i].vpage = -1;
-			lines[i].fid = -1;
-			locks[i] = 0;
+			for( int i = 0; i < N; ++i )
+			{
+				lines[i].refCount = 0;
+				lines[i].physicalPage = 0;
+				lines[i].vpage = INVALID_VPAGE;
+				lines[i].fid = INVALID_FID;
+				locks[i] = 0;
+			}
 		}
 	}
 };
@@ -288,7 +294,7 @@ public:
 						{
 							// We locked the page, now we can do whatever we want
 							// First check if we are evicting an existing map
-							if( line.fid != -1 )
+							if( line.fid != INVALID_FID )
 							{
 								int oldPhysical = line.physicalPage;
 								volatile void* ptr = m_mem + ((size_t)oldPhysical << FS_LOGBLOCKSIZE);

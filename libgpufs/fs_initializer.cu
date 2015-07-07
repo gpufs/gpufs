@@ -41,6 +41,8 @@
 
 #include "fs_initializer.cu.h"
 
+#include "donard.h"
+
 #include <nvToolsExt.h>
 
 
@@ -75,7 +77,7 @@ __device__ int g_file_id;
 // a ring buffer for write back
 __device__ async_close_rb_t* g_async_close_rb;
 
-__device__ volatile void* g_stagingArea[RW_HOST_WORKERS][RW_SCRATCH_PER_WORKER];
+__device__ volatile uchar* g_stagingArea[RW_HOST_WORKERS][RW_SCRATCH_PER_WORKER];
 
 __global__ void init_fs(volatile CPU_IPC_OPEN_Queue* _ipcOpenQueue, 
 			volatile CPU_IPC_RW_Queue* _ipcRWQueue, 
@@ -111,9 +113,10 @@ __global__ void init_fs(volatile CPU_IPC_OPEN_Queue* _ipcOpenQueue,
 	{
 		for( int j = 0; j < RW_SCRATCH_PER_WORKER; ++j )
 		{
-			g_stagingArea[i][j] = _stagingArea[i * RW_SCRATCH_PER_WORKER + j];
+			g_stagingArea[i][j] = (volatile uchar*)_stagingArea[i * RW_SCRATCH_PER_WORKER + j];
 		}
 	}
+
 
 	INIT_ALL_STATS
 	INIT_TIMING_STATS
@@ -258,6 +261,8 @@ void initializer(GPUGlobals_ptr* globals)
 	CUDA_SAFE_CALL(cudaSetDeviceFlags(cudaDeviceMapHost));
 	*globals=new GPUGlobals();
 
+	ssd_init( (*globals)->stagingArea, sizeof(uchar) * RW_HOST_WORKERS * RW_SCRATCH_PER_WORKER * FS_BLOCKSIZE * RW_SLOTS_PER_WORKER );
+
 	volatile void** temp;
 	CUDA_SAFE_CALL(cudaMalloc(&temp,sizeof(void*) * RW_HOST_WORKERS * RW_SCRATCH_PER_WORKER));
 
@@ -265,8 +270,10 @@ void initializer(GPUGlobals_ptr* globals)
 	{
 		for( int j = 0; j < RW_SCRATCH_PER_WORKER; ++j )
 		{
+			void* blockAddress = getStagingAreaOffset((*globals)->stagingArea, i, j);
+
 			CUDA_SAFE_CALL(
-					cudaMemcpy(&(temp[i * RW_SCRATCH_PER_WORKER + j]), (void*)&((*globals)->stagingArea[i][j]), sizeof(void*), cudaMemcpyHostToDevice) );
+					cudaMemcpy(&(temp[i * RW_SCRATCH_PER_WORKER + j]), &blockAddress, sizeof(void*), cudaMemcpyHostToDevice) );
 		}
 	}
 

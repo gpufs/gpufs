@@ -232,7 +232,7 @@ DEBUG_NOINLINE __device__ volatile PFrame* getRwLockedPage( int fd, size_t block
 //			int return_offset = readNoCache(&(e->return_offset));
 
 //			PRINT( "entry: %8d workerID: %8d return_size: %8d return_offset: %8d\n", entry, workerID, e->return_size, e->return_offset );
-			copy_block( (uchar*)pframe->page, ((uchar*)g_stagingArea[workerID][e->scratch_index]) + e->return_offset, e->return_size );
+			copy_block( (uchar*)pframe->page, g_stagingArea[workerID][e->scratch_index] + e->return_offset, e->return_size );
 
 			__syncthreads();
 			COPY_BLOCK_STOP
@@ -457,7 +457,7 @@ DEBUG_NOINLINE __device__ volatile PFrame* getRwLockedPage_warp( int fd, size_t 
 		volatile CPU_IPC_RW_Entry* e = &(g_cpu_ipcRWQueue->entries[entry]);
 		int workerID = entry / RW_SLOTS_PER_WORKER;
 
-		copy_block_warp( (uchar*)pframe->page, ((uchar*)g_stagingArea[workerID][e->scratch_index]) + e->return_offset, e->return_size );
+		copy_block_warp( (uchar*)pframe->page, g_stagingArea[workerID][e->scratch_index] + e->return_offset, e->return_size );
 
 		if( laneid == 0 )
 		{

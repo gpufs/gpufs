@@ -55,13 +55,13 @@ __device__ void _dbg(const char *s,
 #define GDBGV(s, v) GDBG(s, (void*)-1, v)
 
 #if DEBUG
-#define PRINT(...) \
+#define GPRINT(...) \
 	if( (threadIdx.x + threadIdx.y + threadIdx.z) ==0 ) \
 	{ \
 		printf(__VA_ARGS__); \
 	}
 #else
-#define PRINT(...)
+#define GPRINT(...)
 #endif
 
 #define PRINT_STATS(SYMBOL) { unsigned int tmp;\
