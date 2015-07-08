@@ -41,6 +41,10 @@ struct PPool{
 	__device__ volatile PFrame *allocPage() volatile;
 
 	__device__ void freePage(volatile PFrame* frame) volatile ;
+
+	__device__ bool tryLockSwapper() volatile;
+	__device__ void lockSwapper() volatile;
+	__device__ void unlockSwapper() volatile;
 };
 
 #endif

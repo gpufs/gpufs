@@ -25,7 +25,6 @@
 #include "fs_globals.cu.h"
 #include "util.cu.h"
 #include "mallocfree.cu.h"
-#include "swapper.cu.h"
 #include "hashMap.cu.h"
 #include <assert.h>
 
@@ -49,7 +48,6 @@ DEBUG_NOINLINE __device__  void PPool::init_thread(volatile Page* _storage) vola
 DEBUG_NOINLINE __device__ volatile PFrame* PPool::allocPage() volatile
 {
 	PAGE_ALLOC_START_WARP
-	bool crash = false;
 
 	int oldSize = atomicSub( (int*) &size, 1 );
 
@@ -155,6 +153,21 @@ DEBUG_NOINLINE __device__ void PPool::freePage(volatile PFrame* frame) volatile
 	freeList[tail] = frame->rs_offset;
 	tail = ( tail + 1 ) % PPOOL_FRAMES;
 	threadfence();
+}
+
+DEBUG_NOINLINE __device__ bool PPool::tryLockSwapper() volatile
+{
+	return MUTEX_TRY_LOCK(swapLock);
+}
+
+DEBUG_NOINLINE __device__ void PPool::lockSwapper() volatile
+{
+	MUTEX_LOCK(swapLock);
+}
+
+DEBUG_NOINLINE __device__ void PPool::unlockSwapper() volatile
+{
+	MUTEX_UNLOCK(swapLock);
 }
 
 #endif

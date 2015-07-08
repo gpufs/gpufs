@@ -39,8 +39,6 @@
 // must be power of 2
 #define MAX_NUM_CLOSED_FILES ( 1 << 10 )
 
-#define MAX_NUM_PRECLOSE_FILES (32)
-
 //** ERROR CODES **//
 #define E_FSTABLE_FULL -1
 #define E_IPC_OPEN_ERROR -2

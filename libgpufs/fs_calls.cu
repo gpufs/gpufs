@@ -26,10 +26,7 @@
 #include "mallocfree.cu.h"
 #include "fs_structures.cu.h"
 #include "timer.h"
-#include "hash_table.cu.h"
-#include "swapper.cu.h"
 #include "fs_globals.cu.h"
-#include "preclose_table.cu.h"
 #include "fs_calls.cu.h"
 #include "fat_pointer.cu.h"
 // no reference counting here
@@ -59,16 +56,16 @@ DEBUG_NOINLINE __device__ int single_thread_open( const char* filename, int flag
 	 unlock ftable
 	 */
 
-	g_otable->lock();
+	g_ftable->lock();
 	bool isNewEntry = false;
-	int fd = g_otable->findEntry( filename, &isNewEntry, flags );
+	int fd = g_ftable->findEntry( filename, &isNewEntry, flags );
 
 	GPU_ASSERT(fd>=0);
 
-	volatile OTable_entry* e = &g_otable->entries[fd];
+	volatile FTable_entry* e = &g_ftable->files[fd];
 	e->refCount++;
 	__threadfence();
-	g_otable->unlock();
+	g_ftable->unlock();
 
 	volatile CPU_IPC_OPEN_Entry* cpu_e = &( g_cpu_ipcOpenQueue->entries[fd] );
 
@@ -81,15 +78,10 @@ DEBUG_NOINLINE __device__ int single_thread_open( const char* filename, int flag
 
 		cpu_inode = readNoCache( &cpu_e->cpu_inode );
 		timestamp = readNoCache( &cpu_e->cpu_timestamp );
-
-		g_ftable->files[fd].file_id = fd;
-		g_ftable->files[fd].cpu_timestamp = timestamp;
-
 		int cpu_fd = readNoCache( &cpu_e->cpu_fd );
 		size_t size = readNoCache( &cpu_e->size );
-		e->notify( cpu_fd, cpu_inode, size, 1 );
 
-//		PRINT("File \"%s\" opened. fd=%d, cpu_fd=%d, size=%ld \n", filename, fd, cpu_fd, size);
+		e->notify( fd, cpu_fd, cpu_inode, size, timestamp, 1 );
 	}
 	else
 	{
@@ -108,8 +100,6 @@ DEBUG_NOINLINE __device__ int gopen( const char* filename, int flags )
 	return ret;
 }
 
-__device__ int gLock;
-
 #define READ 0
 #define WRITE 1
 
@@ -120,8 +110,6 @@ DEBUG_NOINLINE __device__ volatile PFrame* getRwLockedPage( int fd, size_t block
 	BEGIN_SINGLE_THREAD
 
 		RT_SEARCH_START
-
-//		MUTEX_LOCK( gLock );
 
 		pframe = NULL;
 
@@ -156,15 +144,10 @@ DEBUG_NOINLINE __device__ volatile PFrame* getRwLockedPage( int fd, size_t block
 				break;
 			}
 		}
-//PRINT("Got frame pframe=%p, state=%d\n", pframe, pframe->state);
 
-//		MUTEX_UNLOCK( gLock );
 		RT_SEARCH_STOP
 
 	END_SINGLE_THREAD
-
-	//	broadcastHelper.v = (void*)pframe;
-	//	pframe = (volatile PFrame*)broadcast( broadcastHelper ).v;
 
 		volatile __shared__ int entry;
 		entry = -1;
@@ -177,7 +160,7 @@ DEBUG_NOINLINE __device__ volatile PFrame* getRwLockedPage( int fd, size_t block
 			// if we inited, the page is locked and we just keep going
 
 			// check that the file has been opened
-			volatile OTable_entry* e = &g_otable->entries[fd];
+			volatile FTable_entry* e = &g_ftable->files[fd];
 
 			if( readNoCache( &e->did_open ) == 0 || readNoCache( &e->did_open ) == 2 )
 			{
@@ -327,19 +310,19 @@ DEBUG_NOINLINE __device__ volatile void* gmmap_threadblock( void *addr, size_t s
 
 		GPU_ASSERT(fd>=0 && fd<MAX_NUM_FILES);
 
-		cpu_fd = g_otable->entries[fd].cpu_fd;
+		cpu_fd = g_ftable->files[fd].cpu_fd;
 		GPU_ASSERT( g_otable->entries[fd].refCount >0 );
 
 		if( block_offset + size > FS_BLOCKSIZE )
 			GPU_ASSERT("Reading beyond the  page boundary"==0);
 
 		// decide whether to fetch data or not
-		if( g_otable->entries[fd].flags == O_GWRONCE )
+		if( g_ftable->files[fd].flags == O_GWRONCE )
 			cpu_fd = -1;
 
 	END_SINGLE_THREAD
 
-	int purpose = ( g_otable->entries[fd].flags == O_GRDONLY ) ? PAGE_READ_ACCESS : PAGE_WRITE_ACCESS;
+	int purpose = ( g_ftable->files[fd].flags == O_GRDONLY ) ? PAGE_READ_ACCESS : PAGE_WRITE_ACCESS;
 	pframe = getRwLockedPage( fd, block_id, cpu_fd, purpose );
 
 	BEGIN_SINGLE_THREAD
@@ -410,7 +393,7 @@ DEBUG_NOINLINE __device__ volatile PFrame* getRwLockedPage_warp( int fd, size_t 
 			// if we inited, the page is locked and we just keep going
 
 			// check that the file has been opened
-			volatile OTable_entry* e = &g_otable->entries[fd];
+			volatile FTable_entry* e = &g_ftable->files[fd];
 
 			if( readNoCache( &e->did_open ) == 0 || readNoCache( &e->did_open ) == 2 )
 			{
@@ -518,14 +501,14 @@ DEBUG_NOINLINE __device__ volatile void* gmmap( void *addr, size_t size, int pro
 
 		GPU_ASSERT(fd>=0 && fd<MAX_NUM_FILES);
 
-		cpu_fd = g_otable->entries[fd].cpu_fd;
+		cpu_fd = g_ftable->files[fd].cpu_fd;
 		GPU_ASSERT( g_otable->entries[fd].refCount >0 );
 
 		if( block_offset + size > FS_BLOCKSIZE )
 			GPU_ASSERT("Reading beyond the  page boundary"==0);
 
 		// decide whether to fetch data or not
-		if( g_otable->entries[fd].flags == O_GWRONCE )
+		if( g_ftable->files[fd].flags == O_GWRONCE )
 			cpu_fd = -1;
 	}
 
@@ -534,7 +517,7 @@ DEBUG_NOINLINE __device__ volatile void* gmmap( void *addr, size_t size, int pro
 	block_offset = broadcast( block_offset );
 	cpu_fd = broadcast( cpu_fd );
 
-	int purpose = ( g_otable->entries[fd].flags == O_GRDONLY ) ? PAGE_READ_ACCESS : PAGE_WRITE_ACCESS;
+	int purpose = ( g_ftable->files[fd].flags == O_GRDONLY ) ? PAGE_READ_ACCESS : PAGE_WRITE_ACCESS;
 	pframe = getRwLockedPage_warp( fd, block_id, cpu_fd, purpose );
 
 //	printf("block_id: %ld, block_offset: %d, pframe: %lx\n", block_id, block_offset, pframe->page);

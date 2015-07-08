@@ -38,12 +38,8 @@ $(OUTPUTDIR)/cpu_ipc.o\
 $(OUTPUTDIR)/fs_calls.o\
 $(OUTPUTDIR)/fs_initializer.o\
 $(OUTPUTDIR)/fs_structures.o\
-$(OUTPUTDIR)/hash_table.o\
 $(OUTPUTDIR)/hashMap.o\
 $(OUTPUTDIR)/mallocfree.o\
-$(OUTPUTDIR)/preclose_table.o\
-$(OUTPUTDIR)/radix_tree.o\
-$(OUTPUTDIR)/swapper.o\
 $(OUTPUTDIR)/timer.o\
 $(OUTPUTDIR)/fs_debug.o\
 $(OUTPUTDIR)/async_ipc.o\
@@ -68,33 +64,18 @@ $(OUTPUTDIR)/cpu_ipc.o: cpu_ipc.cu fs_constants.h \
 	$(NVCC) -dc cpu_ipc.cu -o $(OUTPUTDIR)/cpu_ipc.o
 
 $(OUTPUTDIR)/fs_calls.o: fs_calls.cu fs_debug.cu.h fs_constants.h  util.cu.h  cpu_ipc.cu.h fs_structures.cu.h  mallocfree.cu.h \
-	timer.h   hash_table.cu.h fat_pointer.cu.h | $(OUTPUTDIR)
+	timer.h fat_pointer.cu.h | $(OUTPUTDIR)
 	$(NVCC) -dc fs_calls.cu -o $(OUTPUTDIR)/fs_calls.o
 
 $(OUTPUTDIR)/fs_initializer.o: fs_initializer.cu fs_debug.cu.h fs_constants.h  util.cu.h  cpu_ipc.cu.h fs_structures.cu.h \
-	mallocfree.cu.h  timer.h   hash_table.cu.h hashMap.cu.h preclose_table.cu.h fs_initializer.cu.h async_ipc.cu.h \
+	mallocfree.cu.h  timer.h hashMap.cu.h fs_initializer.cu.h async_ipc.cu.h \
 	generic_ringbuf.cu.h | $(OUTPUTDIR)
 	$(NVCC) -dc fs_initializer.cu -o $(OUTPUTDIR)/fs_initializer.o
 
-$(OUTPUTDIR)/hash_table.o: hash_table.cu hash_table.cu.h fs_constants.h util.cu.h fs_debug.cu.h hashMap.cu.h \
-	fs_structures.cu.h | $(OUTPUTDIR)
-	$(NVCC) -dc hash_table.cu -o $(OUTPUTDIR)/hash_table.o
-
-$(OUTPUTDIR)/mallocfree.o: mallocfree.cu fs_constants.h util.cu.h mallocfree.cu.h fs_structures.cu.h swapper.cu.h fs_debug.cu.h | $(OUTPUTDIR)
+$(OUTPUTDIR)/mallocfree.o: mallocfree.cu fs_constants.h util.cu.h mallocfree.cu.h fs_structures.cu.h fs_debug.cu.h | $(OUTPUTDIR)
 	$(NVCC) -dc mallocfree.cu -o $(OUTPUTDIR)/mallocfree.o
 
-$(OUTPUTDIR)/preclose_table.o: preclose_table.cu.h preclose_table.cu util.cu.h fs_debug.cu.h fs_constants.h | $(OUTPUTDIR)
-	$(NVCC) -dc preclose_table.cu -o $(OUTPUTDIR)/preclose_table.o
-
-$(OUTPUTDIR)/radix_tree.o: radix_tree.cu hashMap.cu.h fs_constants.h swapper.cu.h util.cu.h fs_debug.cu.h \
-	fs_structures.cu.h | $(OUTPUTDIR)
-	$(NVCC) -dc radix_tree.cu -o $(OUTPUTDIR)/radix_tree.o
-
-$(OUTPUTDIR)/swapper.o: swapper.cu.h swapper.cu fs_structures.cu.h fs_constants.h hash_table.cu.h util.cu.h \
-	fs_debug.cu.h hashMap.cu.h async_ipc.cu.h generic_ringbuf.cu.h | $(OUTPUTDIR)
-	$(NVCC)	-dc swapper.cu -o $(OUTPUTDIR)/swapper.o
-
-$(OUTPUTDIR)/fs_structures.o: fs_structures.cu fs_structures.cu.h swapper.cu.h swapper.cu fs_constants.h hash_table.cu.h util.cu.h \
+$(OUTPUTDIR)/fs_structures.o: fs_structures.cu fs_structures.cu.h fs_constants.h util.cu.h \
 	fs_debug.cu.h hashMap.cu.h | $(OUTPUTDIR)
 	$(NVCC)	-dc fs_structures.cu -o $(OUTPUTDIR)/fs_structures.o
 

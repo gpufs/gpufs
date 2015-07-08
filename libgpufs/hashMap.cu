@@ -83,12 +83,9 @@ DEBUG_NOINLINE __device__ volatile PFrame* HashMap::getPFrame( int fd, size_t bl
 	{
 		// Page is not found, try to add it
 		volatile PFrame* newData = g_ppool->allocPage();
-		int tries = 0;
 		while( newData == NULL )
 		{
 			newData = g_ppool->allocPage();
-//			tries++;
-//			GPU_ASSERT( tries < 100 );
 		}
 
 		newData->try_lock_init();
@@ -125,12 +122,9 @@ DEBUG_NOINLINE __device__ volatile PFrame* HashMap::getPFrame( int fd, size_t bl
 
 	// Data is not found, try to add it
 	volatile PFrame* newData = g_ppool->allocPage();
-	int tries = 0;
 	while( newData == NULL )
 	{
 		newData = g_ppool->allocPage();
-//		tries++;
-//		GPU_ASSERT( tries < 100 );
 	}
 
 	newData->try_lock_init();

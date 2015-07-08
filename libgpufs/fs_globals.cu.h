@@ -20,7 +20,6 @@
 #ifndef fs_globals_cu_h
 #define fs_globals_cu_h
 #include <assert.h>
-#include "hash_table.cu.h"
 #include "cpu_ipc.cu.h"
 #include "fs_structures.cu.h"
 #include "hashMap.cu.h"
@@ -40,17 +39,11 @@ extern __device__  async_close_rb_t* g_async_close_rb;
 // manager for rw RPC queue
 extern __device__ volatile GPU_IPC_RW_Manager* g_ipcRWManager;
 
-// Open/Close table
-extern __device__ volatile OTable* g_otable;
-
 // Memory pool
 extern __device__ volatile PPool* g_ppool;
 
 // File table with block pointers
 extern __device__ volatile FTable* g_ftable;
-
-// Hash table with all the previously opened files indexed by their inodes
-//extern __device__ volatile hash_table g_closed_ftable;
 
 // HashMap with mapping from <fd, offset> to pframes
 extern __device__ volatile HashMap* g_hashMap;

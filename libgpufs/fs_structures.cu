@@ -145,14 +145,37 @@ DEBUG_NOINLINE __device__ void PFrame::markDirty() volatile
 	dirty = 1;
 }
 
-__device__ void FTable_entry::clean() volatile
+DEBUG_NOINLINE __device__ void DirtyList::init_thread() volatile
 {
-	dirty_tree = 0;
+	_lock = 0;
+	count = 0;
+	head = NULL;
+}
+
+DEBUG_NOINLINE __device__ void DirtyList::clean() volatile
+{
+	count = 0;
+	head = NULL;
+}
+
+DEBUG_NOINLINE __device__ void DirtyList::lock() volatile
+{
+	MUTEX_LOCK( _lock );
+}
+
+DEBUG_NOINLINE __device__ bool DirtyList::try_lock() volatile
+{
+	return MUTEX_TRY_LOCK(_lock);
+}
+
+DEBUG_NOINLINE __device__ void DirtyList::unlock() volatile
+{
+	MUTEX_UNLOCK( _lock );
 }
 
 //******* OPEN/CLOSE *//
 
-DEBUG_NOINLINE __device__ void OTable_entry::init_thread() volatile
+DEBUG_NOINLINE __device__ void FTable_entry::init_thread() volatile
 {
 	status = FSENTRY_EMPTY;
 	refCount = 0;
@@ -160,7 +183,7 @@ DEBUG_NOINLINE __device__ void OTable_entry::init_thread() volatile
 	cpu_inode = (unsigned int) -1;
 }
 
-DEBUG_NOINLINE __device__ void OTable_entry::init( const volatile char* _filename, int _flags ) volatile
+DEBUG_NOINLINE __device__ void FTable_entry::init( const volatile char* _filename, int _flags ) volatile
 {
 	strcpy_thread( filename, _filename, FILENAME_SIZE );
 	status = FSENTRY_PENDING;
@@ -170,64 +193,66 @@ DEBUG_NOINLINE __device__ void OTable_entry::init( const volatile char* _filenam
 	flags = _flags;
 	did_open = 0;
 }
-DEBUG_NOINLINE __device__ void OTable_entry::notify( int _cpu_fd, unsigned int _cpu_inode, size_t _size,
-		int _did_open ) volatile
+
+DEBUG_NOINLINE __device__ void FTable_entry::notify( int fd, int _cpu_fd, unsigned int _cpu_inode, size_t _size,
+		double timestamp, int _did_open ) volatile
 {
+	file_id = fd;
 	cpu_fd = _cpu_fd;
 	cpu_inode = _cpu_inode;
-	did_open = _did_open;
 	size = _size;
+	cpu_timestamp = timestamp;
+	did_open = _did_open;
 	__threadfence();
 	status = FSENTRY_OPEN;
 	__threadfence();
 }
 
-DEBUG_NOINLINE __device__ void OTable_entry::wait_open() volatile
+DEBUG_NOINLINE __device__ void FTable_entry::wait_open() volatile
 {
 	WAIT_ON_MEM( status, FSENTRY_OPEN );
 }
 
-DEBUG_NOINLINE __device__ void OTable_entry::clean() volatile
+DEBUG_NOINLINE __device__ void FTable_entry::clean() volatile
 {
 	GPU_ASSERT(refCount==0);
 	status = FSENTRY_EMPTY;
 	did_open = 0;
+	dirty = 0;
 }
 
-DEBUG_NOINLINE __device__ void OTable::lock() volatile
+DEBUG_NOINLINE __device__ void FTable::lock() volatile
 {
 	MUTEX_LOCK( _lock );
 }
 
-DEBUG_NOINLINE __device__ void OTable::unlock() volatile
+DEBUG_NOINLINE __device__ void FTable::unlock() volatile
 {
 	MUTEX_UNLOCK( _lock );
 }
 
-DEBUG_NOINLINE __device__ void OTable::init_thread() volatile
+DEBUG_NOINLINE __device__ void FTable::init_thread() volatile
 {
 	for( int i = 0; i < FSTABLE_SIZE; i++ )
 	{
-		entries[i].init_thread();
+		files[i].init_thread();
 		_lock = 0;
 	}
 }
 
-DEBUG_NOINLINE __device__ int OTable::findEntry( volatile const char* filename, volatile bool* isNewEntry,
+DEBUG_NOINLINE __device__ int FTable::findEntry( volatile const char* filename, volatile bool* isNewEntry,
 		int o_flags ) volatile
 {
-	// TODO: this can be sped up by creating a management GPU buffer instead of searching CPU every time
-
 	*isNewEntry = true;
 	int found = E_FSTABLE_FULL;
 
 	for( int i = 0; i < FSTABLE_SIZE; i++ )
 	{
-		if( (found == E_FSTABLE_FULL) && (entries[i].status == FSENTRY_EMPTY) )
+		if( (found == E_FSTABLE_FULL) && (files[i].status == FSENTRY_EMPTY) )
 		{
 			found = i;
 		}
-		else if( !strcmp_thread( filename, entries[i].filename, FILENAME_SIZE ) )
+		else if( !strcmp_thread( filename, files[i].filename, FILENAME_SIZE ) )
 		{
 			// found entry
 			found = i;
@@ -237,7 +262,7 @@ DEBUG_NOINLINE __device__ int OTable::findEntry( volatile const char* filename, 
 	}
 	if( found != E_FSTABLE_FULL && *isNewEntry )
 	{
-		entries[found].init( filename, o_flags );
+		files[found].init( filename, o_flags );
 		__threadfence();
 	}
 	return found;

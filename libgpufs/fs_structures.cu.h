@@ -41,6 +41,7 @@ public:
 	volatile int 	dirtyCounter;
 
 	volatile PFrame* 	next;
+	volatile PFrame* 	nextDirty;
 
 	__device__ void init_thread( volatile Page* _page, int _rs_offset ) volatile;
 	__device__ void clean() volatile;
@@ -56,31 +57,28 @@ public:
 	__device__ void markDirty() volatile;
 };
 
+struct DirtyList
+{
+private:
+	int 				_lock;
+
+public:
+
+	volatile size_t 	count;
+	volatile PFrame* 	head;
+
+	__device__ void init_thread() volatile;
+	__device__ void clean() volatile;
+
+	__device__ void lock() volatile;
+	__device__ bool try_lock() volatile;
+	__device__ void unlock() volatile;
+};
+
 struct FTable_entry
 {
-	int file_id;
-
-	int drop_cache;
-	int dirty_tree;
-	double cpu_timestamp;
-
-//		rt_node busy_list;
-
-	__device__ void clean() volatile;
-};
-
-
-struct FTable
-{
-	volatile FTable_entry files[MAX_NUM_FILES];
-};
-
-
-//**********open/close**********//
-// separate table for open/close operations
-struct OTable_entry
-{
 	volatile char filename[FILENAME_SIZE];
+	volatile int file_id;
 	volatile int status;
 	volatile int refCount;
 	volatile int cpu_fd;
@@ -89,29 +87,27 @@ struct OTable_entry
 	volatile unsigned int cpu_inode;
 	volatile int did_open;
 
-	__device__ void copy_old_data( volatile OTable_entry* n ) volatile
-	{
-		cpu_fd = n->cpu_fd;
-		size = n->size;
-		flags = n->flags;
-		cpu_inode = n->cpu_inode;
-	}
+	volatile int drop_cache;
+	volatile int dirty;
+	double cpu_timestamp;
+
+	DirtyList dirtyList;
 
 	__device__ void init_thread() volatile;
 
 	__device__ void init( volatile const char* _filename, int _flags ) volatile;
 
-	__device__ void notify( int cpu_fd, unsigned int cpu_inode, size_t size, int _did_open ) volatile;
+	__device__ void notify( int fd, int cpu_fd, unsigned int cpu_inode, size_t size, double timestamp, int _did_open ) volatile;
 
 	__device__ void wait_open() volatile;
 
 	__device__ void clean() volatile;
 };
 
-struct OTable
-{
 
-	volatile OTable_entry entries[FSTABLE_SIZE];
+struct FTable
+{
+	volatile FTable_entry files[FSTABLE_SIZE];
 	int _lock;
 
 	__device__ void lock() volatile;
@@ -121,7 +117,6 @@ struct OTable
 	__device__ int findEntry( const volatile char* filename, volatile bool* isNewEntry, int o_flags ) volatile;
 
 	__device__ void init_thread() volatile;
-
 };
 
 #endif

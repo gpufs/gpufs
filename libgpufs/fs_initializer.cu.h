@@ -34,22 +34,8 @@
 #include "mallocfree.cu.h"
 #include "fs_structures.cu.h"
 #include "timer.h"
-#include "hash_table.cu.h"
-#include "preclose_table.cu.h"
 #include "fs_globals.cu.h"
 #include "gpufs_con_lib.h"
-__global__ void init_fs(volatile CPU_IPC_OPEN_Queue* _ipcOpenQueue, 
-			volatile CPU_IPC_RW_Queue* _ipcRWQueue, 
-			volatile GPU_IPC_RW_Manager* _ipcRWManager, 
-			volatile OTable* _otable, 
-			volatile PPool* _ppool, 
-			volatile Page* _rawStorage,
-			volatile FTable* _ftable,
-			volatile void* _rtree_raw_store,
-			rtree*volatile _rtree_array,
-			volatile preclose_table* _preclose_table,
-			async_close_rb_t* _async_rpc);
-
 
 #define  initGpuShmemPtr(T, h_ptr,symbol)\
 {\
@@ -130,8 +116,6 @@ struct GPUGlobals{
 
 // RW GPU manager
 	GPU_IPC_RW_Manager* ipcRWManager;
-// Open/Close table
-	OTable* otable;
 // Memory pool
 	PPool* ppool;
 // File table with block pointers
@@ -141,12 +125,9 @@ struct GPUGlobals{
 // Device memory staging area
 	uchar* stagingArea;
 // gpufs device file decsriptor
-        int gpufs_fd;
+    int gpufs_fd;
 // hashMap for the buffer cache frames
 	HashMap* hashMap;
-
-// preclose table:
-	preclose_table* _preclose_table;
 
 // async close ringbuffer
  	async_close_rb_t* async_close_rb;
@@ -167,7 +148,6 @@ struct GPUGlobals{
 		cpu_ipcRWFlags->init_host();
 
 		initGpuGlobals(GPU_IPC_RW_Manager,ipcRWManager,g_ipcRWManager);
-		initGpuGlobals(OTable,otable,g_otable);
 		initGpuGlobals(PPool,ppool,g_ppool);
 		initGpuGlobals(FTable,ftable,g_ftable);
 		initGpuGlobals(HashMap,hashMap,g_hashMap);
@@ -209,12 +189,10 @@ struct GPUGlobals{
 		cudaFreeHost((void*)cpu_ipcRWQueue);
 		
 		cudaFree(ipcRWManager);
-		cudaFree(otable);
 		cudaFree(ppool);
 		cudaFree(ftable);
 		cudaFree(rawStorage);
 		cudaFree(hashMap);
-		cudaFree(_preclose_table);
 		cudaFree(async_close_rb_gpu);
 		delete streamMgr;
 	}
