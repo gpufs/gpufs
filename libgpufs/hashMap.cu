@@ -38,7 +38,7 @@ DEBUG_NOINLINE __device__ void HashMap::init_thread() volatile
 	}
 }
 
-DEBUG_NOINLINE __device__ volatile PFrame* HashMap::readPFrame( int fd, size_t block_id, bool& busy ) volatile
+DEBUG_NOINLINE __device__ volatile PFrame* HashMap::readPFrame( int fd, int version, size_t block_id, bool& busy ) volatile
 {
 	busy = false;
 
@@ -51,7 +51,7 @@ DEBUG_NOINLINE __device__ volatile PFrame* HashMap::readPFrame( int fd, size_t b
 	{
 		if( ( it->file_id == fd ) &&  (it->file_offset == offset ) )
 		{
-			if( it->try_lock_rw( fd, offset ) )
+			if( it->try_lock_rw( fd, version, offset ) )
 			{
 				return it;
 			}
@@ -69,7 +69,7 @@ DEBUG_NOINLINE __device__ volatile PFrame* HashMap::readPFrame( int fd, size_t b
 }
 
 
-DEBUG_NOINLINE __device__ volatile PFrame* HashMap::getPFrame( int fd, size_t block_id ) volatile
+DEBUG_NOINLINE __device__ volatile PFrame* HashMap::getPFrame( int fd, int version, size_t block_id ) volatile
 {
 	uint index = calcHash( fd, block_id );
 	size_t offset = block_id << FS_LOGBLOCKSIZE;
@@ -92,6 +92,7 @@ DEBUG_NOINLINE __device__ volatile PFrame* HashMap::getPFrame( int fd, size_t bl
 
 		newData->file_id = fd;
 		newData->file_offset = offset;
+		newData->version = version;
 
 		frames[index] = newData;
 		threadfence();
@@ -105,7 +106,7 @@ DEBUG_NOINLINE __device__ volatile PFrame* HashMap::getPFrame( int fd, size_t bl
 	{
 		if( ( it->file_id == fd ) &&  (it->file_offset == offset ) )
 		{
-			if( it->try_lock_rw( fd, offset ) )
+			if( it->try_lock_rw( fd, version, offset ) )
 			{
 				MUTEX_UNLOCK( locks[index] );
 				return it;
@@ -131,6 +132,7 @@ DEBUG_NOINLINE __device__ volatile PFrame* HashMap::getPFrame( int fd, size_t bl
 
 	newData->file_id = fd;
 	newData->file_offset = offset;
+	newData->version = version;
 
 	// Make sure the pointers are always valid and seen by everyone in the correct order
 	newData->next = frames[index];

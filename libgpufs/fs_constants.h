@@ -50,6 +50,7 @@
 #define FSENTRY_PENDING	1
 #define FSENTRY_OPEN	2
 #define FSENTRY_CLOSING	3
+#define FSENTRY_CLOSED	4
 
 //** CPU IPC 
 #define CPU_IPC_EMPTY 0

@@ -46,7 +46,7 @@ struct CPU_IPC_OPEN_Entry
 	__device__ int open(const char* reqFname, int flags, int do_not_open) volatile;
 	__device__ int reopen() volatile;
 	__device__ int unlink(const char* reqFname) volatile;
-	__device__ int close(int cpu_fd, unsigned int _drop_residence_inode, bool _is_dirty, int did_open) volatile;
+	__device__ int close(int cpu_fd, unsigned int _drop_residence_inode, bool _is_dirty) volatile;
 	
 
 	__host__ void init_host() volatile;
@@ -87,7 +87,7 @@ struct CPU_IPC_RW_Entry
 	
 	__device__ void clean() volatile;
 
-	__device__ int read_write(int _cpu_fd, size_t _buffer_offset, size_t _file_offset, uint _size,uint _type) volatile;
+	__device__ int read_write(int fd, int _cpu_fd, volatile PFrame* frame, uint purpose, bool addToDirtyList = false) volatile;
 	
 	__device__ int ftruncate(int cpu_fd) volatile;
 
@@ -100,7 +100,7 @@ struct CPU_IPC_RW_Queue
 
 	__host__ void init_host() volatile;
 
-	__device__ int  read_write_block(int cpu_fd,size_t  _buffer_offset, size_t _file_offset, int size,int type, int& entry) volatile;
+	__device__ int read_write_page(int fd, int cpu_fd, volatile PFrame* frame, int type, int& entry, bool addToDirtyList = false) volatile;
 };
 
 struct CPU_IPC_RW_Flags
@@ -110,7 +110,11 @@ struct CPU_IPC_RW_Flags
 	__host__ void init_host() volatile;
 };
 
-__device__ int read_cpu(int cpu_fd, volatile PFrame* frame, int& entry);
+__device__ int read_cpu( int fd, int cpu_fd, volatile PFrame* frame, int purpose, int& entry );
+__device__ int write_cpu( int fd, int cpu_fd, volatile PFrame* frame, int flags );
+
+__device__ int writeback_page_async_on_close(int cpu_fd, volatile PFrame* frame, int flags);
+__device__ void writeback_page_async_on_close_done(int cpu_fd);
 
 __device__ void freeEntry(int entry);
 

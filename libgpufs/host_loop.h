@@ -70,6 +70,71 @@ void fd2name(const int fd, char* name, int namelen)
 		name[s] = '\0';
 }
 
+Page diff_page;
+
+uchar* diff_and_merge(const Page* page, uint req_cpu_fd, size_t req_size,
+		size_t req_file_offset)
+{
+
+	struct stat s;
+
+	if (fstat(req_cpu_fd, &s))
+		s.st_size = 0;
+
+	int data_read;
+	if (s.st_size < req_file_offset)
+	{
+		data_read = 0;
+	}
+	else
+	{
+		data_read = pread(req_cpu_fd, &diff_page, req_size, req_file_offset);
+	}
+
+	//fprintf(stderr,"read %d, offset %d\n",data_read,req_file_offset);
+	if (data_read < 0)
+	{
+		perror("pread failed while diff\n");
+		req_size = (size_t) -1;
+	}
+	//if (data_read==0) fprintf(stderr,"empty read\n");
+
+//	uchar* tmp=(uchar*)page;
+//	uchar* data_ptr=(uchar*)&diff_page;
+//	if (data_read==0){
+
+//		data_ptr=tmp; // copy directly from the buffer
+
+//	}else
+	typedef char v32c __attribute__ ((vector_size (16)));
+	uchar* data_ptr = (uchar*) page;
+	v32c* A_v = (v32c*) data_ptr;
+	v32c* B_v = (v32c*) &diff_page;
+	;
+	if (data_read > 0)
+	{
+
+		// perform diff-ed write
+//		for(int zzz=0;zzz<data_read;zzz++)
+//		{
+//			if (tmp[zzz]) {
+//				((uchar*)diff_page)[zzz]=tmp[zzz];
+///			}
+//		}
+
+		int left = data_read % sizeof(v32c);
+		for (int zzz = 0; zzz < (data_read / sizeof(v32c) + (left != 0)); zzz++)
+		{
+			// new is new OR old
+			//data_ptr[zzz]=data_ptr[zzz]|((uchar*)diff_page)[zzz];
+			A_v[zzz] = A_v[zzz] | B_v[zzz];
+		}
+
+		//memcpy(((char*)&diff_page)+data_read,tmp+data_read,req_size-data_read);
+	}
+	return data_ptr;
+}
+
 double asyncMemCpyTime[RW_HOST_WORKERS] = {0};
 int asyncMemCpyCount[RW_HOST_WORKERS] = {0};
 size_t asyncMemCpySize[RW_HOST_WORKERS] = {0};
@@ -85,13 +150,150 @@ volatile int activeEntries[RW_HOST_WORKERS][RW_SCRATCH_PER_WORKER][RW_SLOTS_PER_
 pthread_mutex_t rwLoopTasksLocks[RW_HOST_WORKERS];
 pthread_cond_t  rwLoopTasksConds[RW_HOST_WORKERS];
 
-void* memoryMenager( void* param )
+void open_loop(volatile GPUGlobals* globals, int gpuid)
 {
-	TaskData* taskData = (TaskData*)param;
+	char* use_gpufs_lib = getenv( "USE_GPUFS_DEVICE" );
 
-//	int gpuid = taskData->gpuid;
-//	int id = taskData->id;
-	volatile GPUGlobals* globals = taskData->gpuGlobals;
+	for( int i = 0; i < FSTABLE_SIZE; i++ )
+	{
+		char filename[FILENAME_SIZE];
+		volatile CPU_IPC_OPEN_Entry* e = &globals->cpu_ipcOpenQueue->entries[i];
+		// we are doing open
+		if( e->status == CPU_IPC_PENDING && e->cpu_fd < 0 )
+		{
+			double vvvv = _timestamp();
+			memcpy( filename, (char*) e->filename, FILENAME_SIZE );
+			// OPEN
+			if( e->flags & O_GWRONCE )
+			{
+				e->flags = O_RDWR | O_CREAT;
+			}
+			char pageflush = 0;
+			int cpu_fd = -1;
+			struct stat s;
+			if( e->do_not_open )
+			{
+				if( stat( filename, &s ) < 0 )
+				{
+					fprintf( stderr, " problem with STAT file %s on CPU: %s\n", filename, strerror( errno ) );
+				}
+			}
+			else
+			{
+				if( use_gpufs_lib )
+					cpu_fd = gpufs_file_open( globals->gpufs_fd, gpuid, filename, e->flags, S_IRUSR | S_IWUSR,
+							&pageflush );
+				else
+				{
+					fprintf( stderr, "Open file: %s\n", filename );
+					cpu_fd = open( filename, e->flags, S_IRUSR | S_IWUSR );
+				}
+
+				if( cpu_fd < 0 )
+				{
+					fprintf( stderr, "Problem with opening file %s on CPU: %s \n ", filename, strerror( errno ) );
+				}
+
+				if( fstat( cpu_fd, &s ) )
+				{
+					fprintf( stderr, "Problem with fstat the file %s on CPU: %s \n ", filename, strerror( errno ) );
+				}
+			}
+
+			e->cpu_fd = cpu_fd;
+			e->flush_cache = pageflush;
+			e->cpu_inode = s.st_ino;
+			e->size = s.st_size;
+			e->cpu_timestamp = s.st_ctime;
+			__sync_synchronize();
+			e->status = CPU_IPC_READY;
+			__sync_synchronize();
+			total_stat += ( _timestamp() - vvvv );
+		}
+		if( e->status == CPU_IPC_PENDING && e->cpu_fd >= 0 )
+		{
+			double vvvv1 = _timestamp();
+			// do close
+			if( use_gpufs_lib )
+			{
+				if( e->is_dirty )
+				{ // if dirty, update gpufs device, but keep the file open
+					e->cpu_fd = gpufs_file_close_stay_open( globals->gpufs_fd, gpuid, e->cpu_fd );
+				}
+				else
+				{
+					e->cpu_fd = gpufs_file_close( globals->gpufs_fd, gpuid, e->cpu_fd );
+				}
+				gpufs_drop_residence( globals->gpufs_fd, gpuid, e->drop_residence_inode );
+			}
+			else
+			{
+				if( !e->is_dirty )
+				{
+					e->cpu_fd = close( e->cpu_fd );
+				}
+			}
+			__sync_synchronize();
+			e->status = CPU_IPC_READY;
+			__sync_synchronize();
+			total_stat1 += _timestamp() - vvvv1;
+		}
+
+	}
+}
+
+void async_close_loop(volatile GPUGlobals* globals)
+{
+	async_close_rb_t* rb = globals->async_close_rb;
+
+	char* no_files = getenv("GPU_NOFILE");
+	/*
+	 data must be read synchronously from GPU, but then __can be__ written asynchronously by CPU. -- TODO!
+	 The goal is to read as much as possible from GPU in order to make CPU close as fast as possible
+	 */
+
+	Page* page = globals->streamMgr->async_close_scratch;
+	page_md_t md;
+
+	while (rb->dequeue(page, &md, globals->streamMgr->async_close_stream))
+	{
+		// drain the ringbuffer
+		int res;
+
+		if (md.last_page == 1)
+		{
+			// that's the last
+			fprintf(stderr, "closing  dirty file %d\n", md.cpu_fd);
+			res = close(md.cpu_fd);
+			if (res < 0)
+				perror("Async close failed, and nobody to report to:\n");
+		}
+		else
+		{
+			uchar* to_write;
+			if (md.type == RW_IPC_DIFF)
+			{
+				to_write = diff_and_merge(page, md.cpu_fd, md.content_size,
+						md.file_offset);
+			}
+			else
+			{
+				to_write = (uchar*) page;
+			}
+
+			int ws = pwrite(md.cpu_fd, to_write, md.content_size,
+					md.file_offset);
+			if (ws != md.content_size)
+			{
+				perror(
+						"Writing while async close failed, and nobody to report to:\n");
+			}
+		}
+	}
+}
+
+void mainLoop( volatile GPUGlobals* globals, int gpuid )
+{
 	int currentScratchIDs[RW_HOST_WORKERS] = {0};
 	int lastScratchIDs[RW_HOST_WORKERS] = {0};
 
@@ -107,11 +309,14 @@ void* memoryMenager( void* param )
 
 	while( !done )
 	{
+		open_loop(globals, gpuid);
+		async_close_loop(globals);
+
 		volatile cudaError_t cuda_status = cudaStreamQuery( globals->streamMgr->kernelStream );
 		if ( cudaErrorNotReady != cuda_status )
 		{
 			done = 1;
-			break;
+			return;
 		}
 
 		for( int i = 0; i < RW_HOST_WORKERS; ++i )
@@ -196,8 +401,6 @@ void* memoryMenager( void* param )
 			}
 		}
 	}
-
-	return NULL;
 }
 
 void* rw_task( void* param )
@@ -313,117 +516,6 @@ void* rw_task( void* param )
 	return NULL;
 }
 
-
-void* open_task( void* param )
-{
-	TaskData* taskData = (TaskData*)param;
-
-	int gpuid = taskData->gpuid;
-	int id = taskData->id;
-	volatile GPUGlobals* globals = taskData->gpuGlobals;
-
-	char* use_gpufs_lib = getenv("USE_GPUFS_DEVICE");
-
-	while( !done )
-	{
-		for (int i = 0; i < FSTABLE_SIZE; i++)
-		{
-			char filename[FILENAME_SIZE];
-			volatile CPU_IPC_OPEN_Entry* e = &globals->cpu_ipcOpenQueue->entries[i];
-			// we are doing open
-			if (e->status == CPU_IPC_PENDING && e->cpu_fd < 0)
-			{
-				double vvvv = _timestamp();
-				memcpy(filename, (char*) e->filename, FILENAME_SIZE);
-				// OPEN
-				if (e->flags & O_GWRONCE)
-				{
-					e->flags = O_RDWR | O_CREAT;
-				}
-				char pageflush = 0;
-				int cpu_fd = -1;
-				struct stat s;
-				if (e->do_not_open)
-				{
-					if (stat(filename, &s) < 0)
-					{
-						fprintf(stderr, " problem with STAT file %s on CPU: %s\n",
-								filename, strerror(errno));
-					}
-				}
-				else
-				{
-					if (use_gpufs_lib)
-						cpu_fd = gpufs_file_open(globals->gpufs_fd, gpuid, filename,
-								e->flags, S_IRUSR | S_IWUSR, &pageflush);
-					else
-					{
-						cpu_fd = open(filename, e->flags, S_IRUSR | S_IWUSR);
-					}
-
-					if (cpu_fd < 0)
-					{
-						fprintf(stderr,
-								"Problem with opening file %s on CPU: %s \n ",
-								filename, strerror(errno));
-					}
-
-					if (fstat(cpu_fd, &s))
-					{
-						fprintf(stderr,
-								"Problem with fstat the file %s on CPU: %s \n ",
-								filename, strerror(errno));
-					}
-				}
-
-				e->cpu_fd = cpu_fd;
-				e->flush_cache = pageflush;
-				e->cpu_inode = s.st_ino;
-				e->size = s.st_size;
-				e->cpu_timestamp = s.st_ctime;
-				__sync_synchronize();
-				e->status = CPU_IPC_READY;
-				__sync_synchronize();
-				total_stat += (_timestamp() - vvvv);
-			}
-			if (e->status == CPU_IPC_PENDING && e->cpu_fd >= 0)
-			{
-				double vvvv1 = _timestamp();
-				// do close
-				if (use_gpufs_lib)
-				{
-					if (e->is_dirty)
-					{ // if dirty, update gpufs device, but keep the file open
-						e->cpu_fd = gpufs_file_close_stay_open(globals->gpufs_fd,
-								gpuid, e->cpu_fd);
-					}
-					else
-					{
-						e->cpu_fd = gpufs_file_close(globals->gpufs_fd, gpuid,
-								e->cpu_fd);
-					}
-					gpufs_drop_residence(globals->gpufs_fd, gpuid,
-							e->drop_residence_inode);
-				}
-				else
-				{
-					if (!e->is_dirty)
-					{
-						e->cpu_fd = close(e->cpu_fd);
-					}
-				}
-				__sync_synchronize();
-				e->status = CPU_IPC_READY;
-				__sync_synchronize();
-				total_stat1 += _timestamp() - vvvv1;
-			}
-
-		}
-	}
-
-	return NULL;
-}
-
 void run_gpufs_handler(volatile GPUGlobals* gpuGlobals, int gpuid)
 {
 	done = 0;
@@ -443,16 +535,8 @@ void run_gpufs_handler(volatile GPUGlobals* gpuGlobals, int gpuid)
 	pthread_attr_init( &attr );
 	pthread_attr_setdetachstate( &attr, PTHREAD_CREATE_JOINABLE );
 
-	pthread_t openLoopTasksIDs[FSTABLE_SIZE];
-	TaskData openLoopTasksData[FSTABLE_SIZE];
-
 	pthread_t rwLoopTasksIDs[RW_HOST_WORKERS];
 	TaskData rwLoopTasksData[RW_HOST_WORKERS];
-
-	pthread_t memoryMenagerID;
-	TaskData memoryMenagerData;
-
-	memoryMenagerData.gpuGlobals = gpuGlobals;
 
 	for( int i = 0; i < RW_HOST_WORKERS; ++i )
 	{
@@ -463,23 +547,9 @@ void run_gpufs_handler(volatile GPUGlobals* gpuGlobals, int gpuid)
 		pthread_create( (pthread_t*)&(rwLoopTasksIDs[i]), &attr, rw_task, (TaskData*)&(rwLoopTasksData[i]) );
 	}
 
-	for( int i = 0; i < 1; ++i )
-	{
-		openLoopTasksData[i].id = i;
-		openLoopTasksData[i].gpuGlobals =  gpuGlobals;
-		openLoopTasksData[i].gpuid = gpuid;
-
-		pthread_create( &openLoopTasksIDs[i], &attr, open_task, &openLoopTasksData[i] );
-	}
-
 	pthread_attr_destroy( &attr );
 
-	memoryMenager( &memoryMenagerData );
-
-	for( int i = 0; i < 1; ++i )
-	{
-		pthread_join( openLoopTasksIDs[i], NULL );
-	}
+	mainLoop( gpuGlobals, gpuid );
 
 	for( int i = 0; i < RW_HOST_WORKERS; ++i )
 	{

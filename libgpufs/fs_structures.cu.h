@@ -27,10 +27,11 @@ private:
 	int 			lock;
 
 public:
-	enum State {INVALID, INIT, VALID};
+	enum State {INVALID, INIT, UPDATING, VALID};
 
 	volatile int 	refCount;
 	volatile State 	state;
+	volatile int	version;
 
 	volatile Page* 	page;
 	volatile uint 	rs_offset;
@@ -49,7 +50,7 @@ public:
 	__device__ bool try_lock_init() volatile;
 	__device__ void unlock_init() volatile;
 
-	__device__ bool try_lock_rw( int fd, size_t offset ) volatile;
+	__device__ bool try_lock_rw( int fd, int version, size_t offset ) volatile;
 	__device__ void unlock_rw() volatile;
 
 	__device__ bool try_invalidate( int fd, size_t offset ) volatile;
@@ -57,7 +58,7 @@ public:
 	__device__ void markDirty() volatile;
 };
 
-struct DirtyList
+struct BusyList
 {
 private:
 	int 				_lock;
@@ -69,6 +70,8 @@ public:
 
 	__device__ void init_thread() volatile;
 	__device__ void clean() volatile;
+
+	__device__ void push( volatile PFrame* frame ) volatile;
 
 	__device__ void lock() volatile;
 	__device__ bool try_lock() volatile;
@@ -84,24 +87,28 @@ struct FTable_entry
 	volatile int cpu_fd;
 	volatile size_t size;
 	volatile int flags;
-	volatile unsigned int cpu_inode;
 	volatile int did_open;
+	volatile int version;
 
 	volatile int drop_cache;
 	volatile int dirty;
 	double cpu_timestamp;
 
-	DirtyList dirtyList;
+	BusyList busyList;
 
 	__device__ void init_thread() volatile;
 
 	__device__ void init( volatile const char* _filename, int _flags ) volatile;
 
-	__device__ void notify( int fd, int cpu_fd, unsigned int cpu_inode, size_t size, double timestamp, int _did_open ) volatile;
+	__device__ void notify( int fd, int cpu_fd, size_t size, double timestamp, int _did_open ) volatile;
 
 	__device__ void wait_open() volatile;
 
+	__device__ void traverse_all_for_close() volatile;
+
 	__device__ void clean() volatile;
+
+	__device__ void close() volatile;
 };
 
 

@@ -30,9 +30,9 @@ struct HashMap
 
 	__device__ void init_thread() volatile;
 
-	__device__ volatile PFrame* readPFrame( int fd, size_t block_id, bool& busy ) volatile;
+	__device__ volatile PFrame* readPFrame( int fd, int version, size_t block_id, bool& busy ) volatile;
 
-	__device__ volatile PFrame* getPFrame( int fd, size_t block_id ) volatile;
+	__device__ volatile PFrame* getPFrame( int fd, int version, size_t block_id ) volatile;
 	
 	__device__ bool removePFrame( volatile PFrame* pframe ) volatile;
 };
