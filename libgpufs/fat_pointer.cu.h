@@ -19,6 +19,7 @@
 #ifndef FAT_POINTER_CU
 #define FAT_POINTER_CU
 
+#include <limits.h>
 #include "fs_constants.h"
 
 // Prevent circular include
@@ -255,7 +256,7 @@ public:
 
 					while( true )
 					{
-						old = atomicCAS(pRefCount, 0, INT32_MIN);
+						old = atomicCAS(pRefCount, 0, INT_MIN);
 
 						if( old > 0 )
 						{
@@ -311,7 +312,7 @@ public:
 
 							threadfence();
 
-							atomicAdd(pRefCount, numWants - INT32_MIN);
+							atomicAdd(pRefCount, numWants - INT_MIN);
 
 							break;
 						}
