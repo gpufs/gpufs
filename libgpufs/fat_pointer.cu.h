@@ -15,7 +15,6 @@
  * M Silberstein,B Ford,I Keidar,E Witchel
  * ASPLOS13, March 2013, Houston,USA
  */
-
 #ifndef FAT_POINTER_CU
 #define FAT_POINTER_CU
 
