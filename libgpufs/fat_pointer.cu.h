@@ -192,7 +192,7 @@ public:
 		return *this;
 	}
 
-	__forceinline__ __device__ T operator *()
+	__forceinline__ __device__ T& operator *()
 	{
 		long long* t = reinterpret_cast<long long*>(&m_ptr);
 
