@@ -49,10 +49,10 @@ __device__ void _dbg(const char *s,
 
 #endif
 
-#define GDBG(s, ptr, v) DBGT(s, ptr, v, 0)
-#define GDBGS(s) GDBG(s, (void*)-1, -1)
-#define GDBGL() GDBG("", (void*)-1, -1)
-#define GDBGV(s, v) GDBG(s, (void*)-1, v)
+#define GDBG(s, ptr, v) DBGT(s, (void*)ptr, (size_t)v, 0)
+#define GDBGS(s) GDBG(s, (void*)-1, (size_t)-1)
+#define GDBGL() GDBG("", (void*)-1, (size_t)-1)
+#define GDBGV(s, v) GDBG(s, (void*)-1, (size_t)v)
 
 #if DEBUG
 #define GPRINT(...) \

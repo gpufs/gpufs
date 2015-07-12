@@ -139,6 +139,8 @@ double asyncMemCpyTime[RW_HOST_WORKERS] = {0};
 int asyncMemCpyCount[RW_HOST_WORKERS] = {0};
 size_t asyncMemCpySize[RW_HOST_WORKERS] = {0};
 
+double asyncCloseLoopTime = 0;
+
 double total_stat = 0;
 double total_stat1 = 0;
 
@@ -242,6 +244,21 @@ void open_loop(volatile GPUGlobals* globals, int gpuid)
 	}
 }
 
+void* open_task(void* data)
+{
+	TaskData* taskData = (TaskData*)data;
+
+	volatile GPUGlobals* globals = taskData->gpuGlobals;
+	int gpuid = taskData->gpuid;
+
+	while( !done )
+	{
+		open_loop( globals, gpuid );
+	}
+
+	return NULL;
+}
+
 void async_close_loop(volatile GPUGlobals* globals)
 {
 	async_close_rb_t* rb = globals->async_close_rb;
@@ -257,6 +274,8 @@ void async_close_loop(volatile GPUGlobals* globals)
 
 	while (rb->dequeue(page, &md, globals->streamMgr->async_close_stream))
 	{
+		asyncCloseLoopTime -= _timestamp();
+
 		// drain the ringbuffer
 		int res;
 
@@ -289,6 +308,8 @@ void async_close_loop(volatile GPUGlobals* globals)
 						"Writing while async close failed, and nobody to report to:\n");
 			}
 		}
+
+		asyncCloseLoopTime += _timestamp();
 	}
 }
 
@@ -309,7 +330,6 @@ void mainLoop( volatile GPUGlobals* globals, int gpuid )
 
 	while( !done )
 	{
-		open_loop(globals, gpuid);
 		async_close_loop(globals);
 
 		volatile cudaError_t cuda_status = cudaStreamQuery( globals->streamMgr->kernelStream );
@@ -519,6 +539,7 @@ void* rw_task( void* param )
 void run_gpufs_handler(volatile GPUGlobals* gpuGlobals, int gpuid)
 {
 	done = 0;
+	asyncCloseLoopTime = 0;
 
 	for( int i = 0; i < RW_HOST_WORKERS; ++i )
 	{
@@ -538,6 +559,9 @@ void run_gpufs_handler(volatile GPUGlobals* gpuGlobals, int gpuid)
 	pthread_t rwLoopTasksIDs[RW_HOST_WORKERS];
 	TaskData rwLoopTasksData[RW_HOST_WORKERS];
 
+	pthread_t openLoopTasksID;
+	TaskData openLoopTasksData;
+
 	for( int i = 0; i < RW_HOST_WORKERS; ++i )
 	{
 		rwLoopTasksData[i].id = i;
@@ -546,6 +570,12 @@ void run_gpufs_handler(volatile GPUGlobals* gpuGlobals, int gpuid)
 
 		pthread_create( (pthread_t*)&(rwLoopTasksIDs[i]), &attr, rw_task, (TaskData*)&(rwLoopTasksData[i]) );
 	}
+
+	openLoopTasksData.id = 0;
+	openLoopTasksData.gpuGlobals =  gpuGlobals;
+	openLoopTasksData.gpuid = 0;
+
+	pthread_create( &openLoopTasksID, &attr, open_task, &openLoopTasksData );
 
 	pthread_attr_destroy( &attr );
 
@@ -556,9 +586,12 @@ void run_gpufs_handler(volatile GPUGlobals* gpuGlobals, int gpuid)
 		pthread_join( rwLoopTasksIDs[i], NULL );
 	}
 
+	pthread_join( openLoopTasksID, NULL );
+
 	totalTime += _timestamp();
 
 	fprintf(stderr, "Transfer time: %fms\n", totalTime / 1e3);
+	fprintf(stderr, "Async close loop time: %fms\n", asyncCloseLoopTime / 1e3);
 
 	int totalCount = 0;
 	size_t totalSize = 0;
@@ -578,7 +611,7 @@ void run_gpufs_handler(volatile GPUGlobals* gpuGlobals, int gpuid)
 		{
 			PRINT_TIMES( "\tAverage buffer size: 0KB\n");
 		}
-		PRINT_TIMES( "\tBandwidth: %fGB/s\n\n", ((float)asyncMemCpySize[i] / (1 << 30)) / (totalTime / 1e6));
+		PRINT_TIMES( "\tBandwidth: %fGB/s\n\n", ((float)asyncMemCpySize[i] / (1 << 30)) / (asyncMemCpyTime[i] / 1e6));
 
 		totalCount += asyncMemCpyCount[i];
 		totalSize += asyncMemCpySize[i];

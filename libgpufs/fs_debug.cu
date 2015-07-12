@@ -94,24 +94,30 @@ __host__ void *gdebug_loop(void *arg) {
     printf("debug loop awake\n");
     while (1) {
         if (_hdbg->valid) {
-        	if( (-1 != (size_t)_hdbg->ptr) && (-1 != _hdbg->data) && ('\0' != _hdbg->s[0]) )
+        	if( ((size_t)-1 != (size_t)_hdbg->ptr) && ((size_t)-1 != _hdbg->data) && ('\0' != _hdbg->s[0]) )
         	{
+        		// GDBG
         		printf("DBG :: File = %-80s :: Func = %-20s :: Line = %-6ld :: %-20s :: ptr = 0x%08lx :: val = %-6ld :: hex = 0x%08lx\n",
                     _hdbg->fname, _hdbg->func, _hdbg->line, _hdbg->s, _hdbg->ptr, _hdbg->data, _hdbg->data);
         	}
-        	else if( (-1 != _hdbg->data) && ('\0' != _hdbg->s[0]) )
+        	else if( ((size_t)-1 != _hdbg->data) && ('\0' != _hdbg->s[0]) )
 			{
+        		// GDBGV
 				printf("DBG :: File = %-80s :: Func = %-20s :: Line = %-6ld :: %-20s :: val = %-6ld :: hex = 0x%08lx\n",
 					_hdbg->fname, _hdbg->func, _hdbg->line, _hdbg->s, _hdbg->data, _hdbg->data);
 			}
         	else if( ('\0' != _hdbg->s[0]) )
 			{
+        		// GDBGS
 				printf("DBG :: File = %-80s :: Func = %-20s :: Line = %-6ld :: %-20s\n",
 					_hdbg->fname, _hdbg->func, _hdbg->line, _hdbg->s);
 			}
-
-
-
+        	else
+        	{
+        		// GDBGL
+				printf("DBG :: File = %-80s :: Func = %-20s :: Line = %-6ld\n",
+					_hdbg->fname, _hdbg->func, _hdbg->line);
+        	}
 
             fflush(stdout);
             memset((void *)_hdbg->s, 0, DBG_MAX_STRING_LEN);

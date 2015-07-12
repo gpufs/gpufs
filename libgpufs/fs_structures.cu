@@ -178,7 +178,7 @@ DEBUG_NOINLINE __device__ void BusyList::push( volatile PFrame* frame ) volatile
 {
 	lock();
 
-	volatile PFrame* temp = (head == NULL) ? NULL : head->nextDirty;
+	volatile PFrame* temp = head;
 	head = frame;
 	frame->nextDirty = temp;
 
@@ -250,7 +250,9 @@ DEBUG_NOINLINE __device__ void FTable_entry::traverse_all_for_close() volatile
 {
 	if ( !dirty ) return;
 
-	busyList.lock();
+	BEGIN_SINGLE_THREAD
+		busyList.lock();
+	END_SINGLE_THREAD
 
 	while( busyList.head != NULL )
 	{
@@ -269,7 +271,9 @@ DEBUG_NOINLINE __device__ void FTable_entry::traverse_all_for_close() volatile
 	dirty = false;
 	writeback_page_async_on_close_done(cpu_fd);
 
+	BEGIN_SINGLE_THREAD
 	busyList.unlock();
+	END_SINGLE_THREAD
 }
 
 DEBUG_NOINLINE __device__ void FTable_entry::clean() volatile

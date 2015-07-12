@@ -27,8 +27,6 @@
 #include "mallocfree.cu.h"
 #include "fs_structures.cu.h"
 #include "timer.h"
-#include "hash_table.cu.h"
-#include "swapper.cu.h"
 #include "fs_globals.cu.h"
 #include "fat_pointer.cu.h"
 

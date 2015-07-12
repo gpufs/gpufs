@@ -44,7 +44,7 @@ BEGIN_SINGLE_THREAD
 	g_ftable->lock();
 	file = &g_ftable->files[fd];
 	file->refCount--;
-	GPU_ASSERT(e->refCount>=0);
+	GPU_ASSERT(file->refCount>=0);
 	res=0;
 
 	if (file->refCount>0 || file->status!=FSENTRY_OPEN)
@@ -372,7 +372,7 @@ DEBUG_NOINLINE __device__ volatile void* gmmap_threadblock( void *addr, size_t s
 		GPU_ASSERT(fd>=0 && fd<MAX_NUM_FILES);
 
 		cpu_fd = g_ftable->files[fd].cpu_fd;
-		GPU_ASSERT( g_otable->entries[fd].refCount >0 );
+		GPU_ASSERT( g_ftable->files[fd].refCount >0 );
 
 		if( block_offset + size > FS_BLOCKSIZE )
 			GPU_ASSERT("Reading beyond the  page boundary"==0);
@@ -549,7 +549,7 @@ DEBUG_NOINLINE __device__ volatile void* gmmap( void *addr, size_t size, int pro
 		GPU_ASSERT(fd>=0 && fd<MAX_NUM_FILES);
 
 		cpu_fd = g_ftable->files[fd].cpu_fd;
-		GPU_ASSERT( g_otable->entries[fd].refCount >0 );
+		GPU_ASSERT( g_ftable->files[fd].refCount >0 );
 
 		if( block_offset + size > FS_BLOCKSIZE )
 			GPU_ASSERT("Reading beyond the  page boundary"==0);
