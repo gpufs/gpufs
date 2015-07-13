@@ -34,7 +34,6 @@
 // we must have multiple threads otherwise it 
 DEBUG_NOINLINE __device__ int gclose( int fd )
 {
-	GPRINT("GPU: Close file: %d\n", fd);
 	__shared__ volatile FTable_entry* file;
 	__shared__ int res;
 
@@ -470,6 +469,10 @@ DEBUG_NOINLINE __device__ volatile PFrame* getRwLockedPage_warp( int fd, int ver
 					GPU_ASSERT("Failed to read data from CPU"==NULL);
 				}
 				pframe->content_size = datasize;
+			}
+			else
+			{
+				file->busyList.push( pframe );
 			}
 		}
 

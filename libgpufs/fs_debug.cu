@@ -61,7 +61,7 @@ __device__ unsigned long long HashMapSearchTime;
 #ifdef DEBUG
 
 #define DBG_MAX_STRING_LEN 20
-#define DBG_MAX_FNAME_LEN 80
+#define DBG_MAX_FNAME_LEN 60
 #define DBG_MAX_FUNC_LEN 20
 
 // This will output the proper CUDA error strings in the event that a CUDA host call returns an error
@@ -97,25 +97,25 @@ __host__ void *gdebug_loop(void *arg) {
         	if( ((size_t)-1 != (size_t)_hdbg->ptr) && ((size_t)-1 != _hdbg->data) && ('\0' != _hdbg->s[0]) )
         	{
         		// GDBG
-        		printf("DBG :: File = %-80s :: Func = %-20s :: Line = %-6ld :: %-20s :: ptr = 0x%08lx :: val = %-6ld :: hex = 0x%08lx\n",
+        		printf("DBG :: File = %-60s :: Func = %-20s :: Line = %-6ld :: %-20s :: ptr = 0x%08lx :: val = %-6ld :: hex = 0x%08lx\n",
                     _hdbg->fname, _hdbg->func, _hdbg->line, _hdbg->s, _hdbg->ptr, _hdbg->data, _hdbg->data);
         	}
         	else if( ((size_t)-1 != _hdbg->data) && ('\0' != _hdbg->s[0]) )
 			{
         		// GDBGV
-				printf("DBG :: File = %-80s :: Func = %-20s :: Line = %-6ld :: %-20s :: val = %-6ld :: hex = 0x%08lx\n",
+				printf("DBG :: File = %-60s :: Func = %-20s :: Line = %-6ld :: %-20s :: val = %-6ld :: hex = 0x%08lx\n",
 					_hdbg->fname, _hdbg->func, _hdbg->line, _hdbg->s, _hdbg->data, _hdbg->data);
 			}
         	else if( ('\0' != _hdbg->s[0]) )
 			{
         		// GDBGS
-				printf("DBG :: File = %-80s :: Func = %-20s :: Line = %-6ld :: %-20s\n",
+				printf("DBG :: File = %-60s :: Func = %-20s :: Line = %-6ld :: %-20s\n",
 					_hdbg->fname, _hdbg->func, _hdbg->line, _hdbg->s);
 			}
         	else
         	{
         		// GDBGL
-				printf("DBG :: File = %-80s :: Func = %-20s :: Line = %-6ld\n",
+				printf("DBG :: File = %-60s :: Func = %-20s :: Line = %-6ld\n",
 					_hdbg->fname, _hdbg->func, _hdbg->line);
         	}
 

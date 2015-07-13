@@ -232,94 +232,119 @@ public:
 
 			int physical = 0;
 
-			if( laneID == leader )
+			size_t h = hash( query );
+			volatile _TlbLine &line = m_tlb->lines[h];
+
+			int* pRefCount = &(m_tlb->locks[h]);
+
+			int old;
+
+			if( laneID == 0 )
 			{
-				size_t h = hash( query );
-				volatile _TlbLine &line = m_tlb->lines[h];
+				old = atomicAdd( pRefCount, numWants );
+			}
+			old = __shfl( old, 0 );
 
-				int* pRefCount = &(m_tlb->locks[h]);
+			if( (old >= 0) && (line.fid = m_fid) && (line.vpage == query) )
+			{
+				// Found the page in the tlb
+				physical = line.physicalPage;
+			}
+			else
+			{
+				// TODO: Add open addressing around here
 
-				int old = atomicAdd( pRefCount, numWants );
-
-				if( (old >= 0) && (line.fid = m_fid) && (line.vpage == query) )
+				// Wrong page, decrease ref count
+				if( laneID == 0 )
 				{
-					// Found the page in the tlb
-					physical = line.physicalPage;
-				}
-				else
-				{
-					// TODO: Add open addressing around here
-
-					// Wrong page, decrease ref count
 					atomicSub( pRefCount, numWants );
+				}
 
-					while( true )
+				while( true )
+				{
+					if( laneID == 0 )
 					{
 						old = atomicCAS(pRefCount, 0, INT_MIN);
+					}
+					old = __shfl( old, 0 );
 
-						if( old > 0 )
+					if( old > 0 )
+					{
+						if( (line.fid = m_fid) && (line.vpage == query) )
 						{
-							if( (line.fid = m_fid) && (line.vpage == query) )
+							// Someone added our line? maybe?
+							if( laneID == 0 )
 							{
-								// Someone added our line? maybe?
 								old = atomicAdd( pRefCount, numWants );
+							}
+							old = __shfl( old, 0 );
 
-								// Let's double check
-								if( (old >= 0) && (line.fid = m_fid) && (line.vpage == query) )
-								{
-									// Found the page in the tlb
-									physical = line.physicalPage;
-									break;
-								}
-								else
-								{
-									// False alarm
-									atomicSub( pRefCount, numWants );
-
-									continue;
-								}
+							// Let's double check
+							if( (old >= 0) && (line.fid = m_fid) && (line.vpage == query) )
+							{
+								// Found the page in the tlb
+								physical = line.physicalPage;
+								break;
 							}
 							else
 							{
-								// Not our page
+								// False alarm
+								if( laneID == 0 )
+								{
+									atomicSub( pRefCount, numWants );
+								}
+								old = __shfl( old, 0 );
+
 								continue;
 							}
 						}
-						else if( old < 0 )
-						{
-							// line is locked
-							continue;
-						}
 						else
 						{
-							// We locked the page, now we can do whatever we want
-							// First check if we are evicting an existing map
-							if( line.fid != INVALID_FID )
-							{
-								int oldPhysical = line.physicalPage;
-								volatile void* ptr = m_mem + ((size_t)oldPhysical << FS_LOGBLOCKSIZE);
-								gmunmap( ptr, FS_BLOCKSIZE );
-							}
+							// Not our page
+							continue;
+						}
+					}
+					else if( old < 0 )
+					{
+						// line is locked
+						continue;
+					}
+					else
+					{
+						// We locked the page, now we can do whatever we want
+						// First check if we are evicting an existing map
+						if( line.fid != INVALID_FID )
+						{
+							int oldPhysical = line.physicalPage;
+							volatile void* ptr = m_mem + ((size_t)oldPhysical << FS_LOGBLOCKSIZE);
+							gmunmap( ptr, FS_BLOCKSIZE );
+						}
 
-							volatile void* ptr = gmmap(NULL, FS_BLOCKSIZE, 0, m_flags, m_fid, (size_t)query << FS_LOGBLOCKSIZE);
+						volatile void* ptr = gmmap(NULL, FS_BLOCKSIZE, 0, m_flags, m_fid, (size_t)query << FS_LOGBLOCKSIZE);
 
+						if( laneID == 0 )
+						{
 							physical = ((size_t)ptr - (size_t)m_mem) >> FS_LOGBLOCKSIZE;
+
 
 							line.fid = m_fid;
 							line.vpage = query;
 							line.physicalPage = physical;
-
-							threadfence();
-
-							atomicAdd(pRefCount, numWants - INT_MIN);
-
-							break;
 						}
+
+						threadfence();
+
+						if( laneID == 0 )
+						{
+							atomicAdd(pRefCount, numWants - INT_MIN);
+						}
+
+						break;
 					}
 				}
 			}
 
-			physical = __shfl( physical, leader );
+			physical = __shfl( physical, 0 );
 
 			if( want )
 			{
