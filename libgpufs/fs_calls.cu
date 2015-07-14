@@ -34,6 +34,7 @@
 // we must have multiple threads otherwise it 
 DEBUG_NOINLINE __device__ int gclose( int fd )
 {
+	FILE_CLOSE_START
 	__shared__ volatile FTable_entry* file;
 	__shared__ int res;
 
@@ -55,7 +56,11 @@ BEGIN_SINGLE_THREAD
 
 END_SINGLE_THREAD
 
-	if (res==1) return 0;
+	if (res==1)
+	{
+		FILE_CLOSE_STOP
+		return 0;
+	}
 
 	__shared__ volatile CPU_IPC_OPEN_Entry* cpu_e;
 	bool was_dirty;
@@ -95,6 +100,7 @@ BEGIN_SINGLE_THREAD
 
 END_SINGLE_THREAD
 
+	FILE_CLOSE_STOP
 	return res;
 }
 
@@ -175,10 +181,12 @@ DEBUG_NOINLINE __device__ int single_thread_open( const char* filename, int flag
 
 DEBUG_NOINLINE __device__ int gopen( const char* filename, int flags )
 {
+	FILE_OPEN_START
 	__shared__ int ret;
 	BEGIN_SINGLE_THREAD
 		ret = single_thread_open( filename, flags );
 	END_SINGLE_THREAD;
+	FILE_OPEN_STOP
 	return ret;
 }
 
@@ -188,43 +196,43 @@ DEBUG_NOINLINE __device__ volatile PFrame* getRwLockedPage( int fd, int version,
 
 	BEGIN_SINGLE_THREAD
 
-		RT_SEARCH_START
+	PAGE_SEARCH_START
 
-		pframe = NULL;
+	pframe = NULL;
 
-		while( NULL == pframe )
+	while( NULL == pframe )
+	{
+		bool busy;
+
+		pframe = g_hashMap->readPFrame( fd, version, block_id, busy );
+		if( pframe != NULL && !busy )
 		{
-			bool busy;
-
-			pframe = g_hashMap->readPFrame( fd, version, block_id, busy );
-			if( pframe != NULL && !busy )
-			{
-				HM_LOCKLESS
-				break;
-			}
-
-			while( busy )
-			{
-				RT_WAIT_START
-				pframe = g_hashMap->readPFrame( fd, version, block_id, busy );
-				RT_WAIT_STOP
-			}
-
-			if( pframe != NULL && !busy )
-			{
-				HM_LOCKLESS
-				break;
-			}
-
-			pframe = g_hashMap->getPFrame( fd, version, block_id );
-			if( pframe != NULL )
-			{
-				HM_LOCKED
-				break;
-			}
+			HM_LOCKLESS
+			break;
 		}
 
-		RT_SEARCH_STOP
+		while( busy )
+		{
+			PAGE_SEARCH_WAIT_START
+			pframe = g_hashMap->readPFrame( fd, version, block_id, busy );
+			PAGE_SEARCH_WAIT_STOP
+		}
+
+		if( pframe != NULL && !busy )
+		{
+			HM_LOCKLESS
+			break;
+		}
+
+		pframe = g_hashMap->getPFrame( fd, version, block_id );
+		if( pframe != NULL )
+		{
+			HM_LOCKED
+			break;
+		}
+	}
+
+	PAGE_SEARCH_STOP
 
 	END_SINGLE_THREAD
 
@@ -258,6 +266,12 @@ DEBUG_NOINLINE __device__ volatile PFrame* getRwLockedPage( int fd, int version,
 				}
 				pframe->content_size = datasize;
 				entry = tEntry;
+			}
+			else
+			{
+				BUSY_LIST_INSERT_START
+				file->busyList.push( pframe );
+				BUSY_LIST_INSERT_STOP
 			}
 
 		} PAGE_READ_STOP
@@ -359,11 +373,14 @@ DEBUG_NOINLINE __device__ int gmunmap( volatile void *addr, size_t length )
 
 DEBUG_NOINLINE __device__ volatile void* gmmap_threadblock( void *addr, size_t size, int prot, int flags, int fd, off_t offset )
 {
+	MAP_START
+
 	__shared__ volatile PFrame* pframe; // the ptr is to global mem but is stored in shmem
 	__shared__ size_t block_id;
 	__shared__ int block_offset;
 
 	__shared__ int cpu_fd;
+
 	BEGIN_SINGLE_THREAD
 		block_id = offset2block( offset, FS_LOGBLOCKSIZE );
 		block_offset = offset2blockoffset( offset, FS_BLOCKSIZE );
@@ -403,6 +420,8 @@ DEBUG_NOINLINE __device__ volatile void* gmmap_threadblock( void *addr, size_t s
 
 	END_SINGLE_THREAD
 	GPU_ASSERT(pframe!=NULL);
+
+	MAP_STOP
 
 	return (void*) ( ( (uchar*) ( pframe->page ) ) + block_offset );
 }
@@ -472,7 +491,9 @@ DEBUG_NOINLINE __device__ volatile PFrame* getRwLockedPage_warp( int fd, int ver
 			}
 			else
 			{
+				BUSY_LIST_INSERT_START_WARP
 				file->busyList.push( pframe );
+				BUSY_LIST_INSERT_STOP_WARP
 			}
 		}
 
@@ -535,6 +556,8 @@ DEBUG_NOINLINE __device__ volatile PFrame* getRwLockedPage_warp( int fd, int ver
 
 DEBUG_NOINLINE __device__ volatile void* gmmap( void *addr, size_t size, int prot, int flags, int fd, off_t offset )
 {
+	MAP_START_WARP
+
 	BroadcastHelper broadcastHelper;
 
 	volatile PFrame* pframe;
@@ -593,7 +616,129 @@ DEBUG_NOINLINE __device__ volatile void* gmmap( void *addr, size_t size, int pro
 
 	GPU_ASSERT(pframe!=NULL);
 
+	MAP_STOP_WARP
+
 	return (void*) ( ( (uchar*) ( pframe->page ) ) + block_offset );
 }
+
+// currently pread is expected to be issued by all threads in a thread block
+// with the same parameters
+// all parameters other than in thread idx ==0 are ignored
+
+DEBUG_NOINLINE __device__ size_t gread(int fd, size_t offset, size_t size, uchar* buffer)
+{
+	__shared__ volatile PFrame* pframe; // the ptr is to global mem but is stored in shmem
+
+	__shared__ size_t block_id;
+	__shared__ int block_offset;
+
+	__shared__ int cpu_fd;
+	__shared__ int  data_read;
+
+	BEGIN_SINGLE_THREAD
+
+	block_id = offset2block(offset,FS_LOGBLOCKSIZE);
+	block_offset = offset2blockoffset(offset,FS_BLOCKSIZE);
+
+	GPU_ASSERT(fd>=0 && fd<MAX_NUM_FILES);
+
+	cpu_fd = g_ftable->files[fd].cpu_fd;
+	GPU_ASSERT(  g_ftable->files[fd].refCount > 0 );
+
+	data_read=0;
+
+	END_SINGLE_THREAD
+
+	while( data_read < size )
+	{
+		int single_op = min((int)(size-data_read),(int)(FS_BLOCKSIZE-block_offset));
+
+		// synchtreads in getRwLockedPage
+		pframe = getRwLockedPage( fd, g_ftable->files[fd].version, block_id, cpu_fd, PAGE_READ_ACCESS );
+
+		// page inited, just read, frame us a _shared_ mem variable
+		//TODO: handle reading beyond eof
+
+		GPU_ASSERT(pframe != NULL);
+
+		copyNoCache_block(buffer + data_read, (uchar*)(pframe->page) + block_offset, single_op);
+
+		BEGIN_SINGLE_THREAD
+
+		block_offset = 0;
+		data_read += single_op;
+		block_id++;
+		pframe->unlock_rw();
+
+		END_SINGLE_THREAD
+	}
+	return size;
+}
+
+DEBUG_NOINLINE __device__ size_t gwrite(int fd,size_t offset, size_t size, uchar* buffer)
+{
+	// attempt to write to a specific block
+	// if null -> allocate
+	// otherwise -> copy to bufcache
+	// mark dirty
+
+	// we ignore that we may run out of disk space
+
+	GPU_ASSERT( fd >= 0 && fd < MAX_NUM_FILES );
+
+	GPU_ASSERT( g_ftable->files[fd].refCount > 0 );
+
+	__shared__ volatile PFrame* pframe; // the ptr is to global mem but is stored in shmem
+	__shared__ size_t block_id;
+	__shared__ int block_offset;
+	__shared__ int cpu_fd;
+	__shared__ int written;
+
+	BEGIN_SINGLE_THREAD
+
+	block_id = offset2block( offset, FS_LOGBLOCKSIZE );
+	block_offset = offset2blockoffset( offset, FS_BLOCKSIZE );
+	cpu_fd = g_ftable->files[fd].cpu_fd;
+	if( ( g_ftable->files[fd].flags == O_GWRONCE ) || ( size == FS_BLOCKSIZE && block_offset == 0 ) )
+	{
+		// we will not read the data from CPU if (1) the file is ONLY_ONCE, or the writes are whole-page writes
+		cpu_fd=-1;
+	}
+
+	written = 0;
+
+	END_SINGLE_THREAD
+
+	while( written < size )
+	{
+		int single_op = min( (int)(size-written), (int)(FS_BLOCKSIZE-block_offset) );
+
+		//TODO: handle reading beyond eof
+
+		pframe = getRwLockedPage( fd, g_ftable->files[fd].version, block_id, cpu_fd, PAGE_WRITE_ACCESS );
+
+		BEGIN_SINGLE_THREAD
+
+		atomicMax( (uint*)&pframe->content_size, block_offset + single_op );
+		pframe->markDirty();
+
+		END_SINGLE_THREAD
+
+		copy_block( (uchar*)(pframe->page)+block_offset, buffer+written, single_op );
+		__threadfence(); // we must sync here otherwise swapper will be inconsistent
+
+		BEGIN_SINGLE_THREAD
+
+		written += single_op;
+		pframe->unlock_rw();
+		// the page is unlocked for flush only here.
+		block_id++;
+		block_offset=0;
+
+		END_SINGLE_THREAD;
+	}
+	return size;
+}
+
 
 #endif

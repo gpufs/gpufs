@@ -187,7 +187,7 @@ void open_loop(volatile GPUGlobals* globals, int gpuid)
 							&pageflush );
 				else
 				{
-					fprintf( stderr, "Open file: %s\n", filename );
+//					fprintf( stderr, "Open file: %s\n", filename );
 					cpu_fd = open( filename, e->flags, S_IRUSR | S_IWUSR );
 				}
 
@@ -261,6 +261,8 @@ void* open_task(void* data)
 
 void async_close_loop(volatile GPUGlobals* globals)
 {
+	asyncCloseLoopTime -= _timestamp();
+
 	async_close_rb_t* rb = globals->async_close_rb;
 
 	char* no_files = getenv("GPU_NOFILE");
@@ -274,8 +276,6 @@ void async_close_loop(volatile GPUGlobals* globals)
 
 	while (rb->dequeue(page, &md, globals->streamMgr->async_close_stream))
 	{
-		asyncCloseLoopTime -= _timestamp();
-
 		// drain the ringbuffer
 		int res;
 
@@ -308,9 +308,9 @@ void async_close_loop(volatile GPUGlobals* globals)
 						"Writing while async close failed, and nobody to report to:\n");
 			}
 		}
-
-		asyncCloseLoopTime += _timestamp();
 	}
+
+	asyncCloseLoopTime += _timestamp();
 }
 
 void mainLoop( volatile GPUGlobals* globals, int gpuid )

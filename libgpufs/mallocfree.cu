@@ -75,7 +75,12 @@ DEBUG_NOINLINE __device__ volatile PFrame* PPool::allocPage() volatile
 			volatile PFrame* cand = &( frames[freeList[tail]] );
 
 			// Try to remove from the hash
-			bool removed = g_hashMap->removePFrame( cand );
+			bool removed = false;
+
+			if( cand->dirty == 0 && cand->dirtyCounter == 0 )
+			{
+				removed = g_hashMap->removePFrame( cand );
+			}
 
 			if( removed )
 			{
@@ -93,7 +98,12 @@ DEBUG_NOINLINE __device__ volatile PFrame* PPool::allocPage() volatile
 			{
 				cand = &( frames[freeList[candLoc]] );
 
-				bool removed = g_hashMap->removePFrame( cand );
+				bool removed = false;
+
+				if( cand->dirty == 0 && cand->dirtyCounter == 0 )
+				{
+					removed = g_hashMap->removePFrame( cand );
+				}
 
 				if( removed )
 				{

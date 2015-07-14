@@ -256,9 +256,13 @@ DEBUG_NOINLINE __device__ void FTable_entry::traverse_all_for_close() volatile
 
 	while( busyList.head != NULL )
 	{
+		syncthreads();
+
 		volatile PFrame* frame = busyList.head;
 		if( frame->dirty || frame->dirtyCounter>0 )
 		{
+			syncthreads();
+
 			writeback_page_async_on_close(cpu_fd, frame, flags);
 			frame->dirty = 0;
 			frame->dirtyCounter = 0;

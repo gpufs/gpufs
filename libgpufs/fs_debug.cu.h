@@ -205,18 +205,19 @@ extern __device__ unsigned int numHM_lockedSuccess;
 /***timing stats****/
 #ifdef TIMING_STATS
 
-extern __device__ unsigned long long RTSearchTime;
 extern __device__ unsigned long long KernelTime;
-extern __device__ unsigned long long RTWaitTime;
+extern __device__ unsigned long long PageSearchTime;
+extern __device__ unsigned long long PageSearchWaitTime;
 extern __device__ unsigned long long MapTime;
 extern __device__ unsigned long long CopyBlockTime;
 extern __device__ unsigned long long PageReadTime;
 extern __device__ unsigned long long PageAllocTime;
 extern __device__ unsigned long long FileOpenTime;
 extern __device__ unsigned long long CPUReadTime;
-extern __device__ unsigned long long HashMapSearchTime;
+extern __device__ unsigned long long BusyListInsertTime;
+extern __device__ unsigned long long FileCloseTime;
 
-#define PRINT_TIME(SYMBOL, freq, blocks) { unsigned long long tmp; \
+#define PRINT_TIME(SYMBOL, blocks) { unsigned long long tmp; \
 			     cudaMemcpyFromSymbol(&tmp,SYMBOL,sizeof(unsigned long long),0,cudaMemcpyDeviceToHost); \
 			     fprintf(stderr,"%s %fms\n", #SYMBOL, ((double)(tmp) / 1e6) / (double)(blocks)); }
 
@@ -253,19 +254,29 @@ extern __device__ unsigned long long HashMapSearchTime;
 		atomicAdd(&timer##Time, timer##Stop - timer##Start); \
 	}
 
-//#define GET_TIME(timer) \
-//	asm volatile ("mov.u64 %0, %%clock64;" : "=l"(timer) :);
+#define INIT_RT_TIMING \
+	INIT_STATS(KernelTime); \
+	INIT_STATS(PageSearchTime); \
+	INIT_STATS(PageSearchWaitTime); \
+	INIT_STATS(MapTime); \
+	INIT_STATS(CopyBlockTime); \
+	INIT_STATS(PageReadTime); \
+	INIT_STATS(PageAllocTime); \
+	INIT_STATS(FileOpenTime); \
+	INIT_STATS(CPUReadTime); \
+	INIT_STATS(FileCloseTime);
 
-#define INIT_RT_TIMING INIT_STATS(RTSearchTime); INIT_STATS(KernelTime);
-
+//////////////////////////////
+// THreadblock level timers //
+//////////////////////////////
 #define KERNEL_START START( Kernel )
 #define KERNEL_STOP STOP( Kernel )
 
-#define RT_SEARCH_START START( RTSearch )
-#define RT_SEARCH_STOP STOP( RTSearch )
+#define PAGE_SEARCH_START START( PageSearch )
+#define PAGE_SEARCH_STOP STOP( PageSearch )
 
-#define RT_WAIT_START START( RTWait )
-#define RT_WAIT_STOP STOP( RTWait )
+#define PAGE_SEARCH_WAIT_START START( PageSearchWait )
+#define PAGE_SEARCH_WAIT_STOP STOP( PageSearchWait )
 
 #define MAP_START START( Map )
 #define MAP_STOP STOP( Map )
@@ -279,77 +290,163 @@ extern __device__ unsigned long long HashMapSearchTime;
 #define PAGE_ALLOC_START START( PageAlloc )
 #define PAGE_ALLOC_STOP STOP( PageAlloc )
 
-#define PAGE_ALLOC_START_WARP START_WARP( PageAlloc )
-#define PAGE_ALLOC_STOP_WARP STOP_WARP( PageAlloc )
-
 #define FILE_OPEN_START START( FileOpen )
 #define FILE_OPEN_STOP STOP( FileOpen )
+
+#define FILE_CLOSE_START START( FileClose )
+#define FILE_CLOSE_STOP STOP( FileClose )
 
 #define CPU_READ_START START( CPURead )
 #define CPU_READ_STOP STOP( CPURead )
 
-#define HASH_MAP_SEARCH_START START( HashMapSearch )
-#define HASH_MAP_SEARCH_STOP STOP( HashMapSearch )
+#define BUSY_LIST_INSERT_START START( BusyListInsert )
+#define BUSY_LIST_INSERT_STOP STOP( BusyListInsert )
 
-#define PRINT_KERNEL_TIME(freq, blocks) PRINT_TIME(KernelTime, freq, blocks);
-#define PRINT_RT_SEARCH_TIME(freq, blocks) PRINT_TIME(RTSearchTime, freq, blocks);
-#define PRINT_RT_WAIT_TIME(freq, blocks) PRINT_TIME(RTWaitTime, freq, blocks);
-#define PRINT_MAP_TIME(freq, blocks) PRINT_TIME(MapTime, freq, blocks);
-#define PRINT_COPY_BLOCK_TIME(freq, blocks) PRINT_TIME(CopyBlockTime, freq, blocks);
-#define PRINT_PAGE_READ_TIME(freq, blocks) PRINT_TIME(PageReadTime, freq, blocks);
-#define PRINT_PAGE_ALLOC_TIME(freq, blocks) PRINT_TIME(PageAllocTime, freq, blocks);
-#define PRINT_FILE_OPEN_TIME(freq, blocks) PRINT_TIME(FileOpenTime, freq, blocks);
-#define PRINT_CPU_READ_TIME(freq, blocks) PRINT_TIME(CPUReadTime, freq, blocks);
-#define PRINT_HASH_MAP_SEARCH_TIME(freq, blocks) PRINT_TIME(HashMapSearchTime, freq, blocks);
+///////////////////////
+// Warp level timers //
+///////////////////////
+#define KERNEL_START_WARP START_WARP( Kernel )
+#define KERNEL_STOP_WARP STOP_WARP( Kernel )
+
+#define PAGE_SEARCH_START_WARP START_WARP( PageSearch )
+#define PAGE_SEARCH_STOP_WARP STOP_WARP( PageSearch )
+
+#define PAGE_SEARCH_WAIT_START_WARP START_WARP( PageSearchWait )
+#define PAGE_SEARCH_WAIT_STOP_WARP STOP_WARP( PageSearchWait )
+
+#define MAP_START_WARP START_WARP( Map )
+#define MAP_STOP_WARP STOP_WARP( Map )
+
+#define COPY_BLOCK_START_WARP START_WARP( CopyBlock )
+#define COPY_BLOCK_STOP_WARP STOP_WARP( CopyBlock )
+
+#define PAGE_READ_START_WARP START_WARP( PageRead )
+#define PAGE_READ_STOP_WARP STOP_WARP( PageRead )
+
+#define PAGE_ALLOC_START_WARP START_WARP( PageAlloc )
+#define PAGE_ALLOC_STOP_WARP STOP_WARP( PageAlloc )
+
+#define FILE_OPEN_START_WARP START_WARP( FileOpen )
+#define FILE_OPEN_STOP_WARP STOP_WARP( FileOpen )
+
+#define FILE_CLOSE_START_WARP START_WARP( FileClose )
+#define FILE_CLOSE_STOP_WARP STOP_WARP( FileClose )
+
+#define CPU_READ_START_WARP START_WARP( CPURead )
+#define CPU_READ_STOP_WARP STOP_WARP( CPURead )
+
+#define BUSY_LIST_INSERT_START_WARP START_WARP( BusyListInsert )
+#define BUSY_LIST_INSERT_STOP_WARP STOP_WARP( BusyListInsert )
+
+//////////////////
+// Timers print //
+//////////////////
+#define PRINT_KERNEL_TIME(blocks) PRINT_TIME(KernelTime, blocks);
+#define PRINT_PAGE_SEARCH_TIME(blocks) PRINT_TIME(PageSearchTime, blocks);
+#define PRINT_PAGE_SEARCH_WAIT_TIME(blocks) PRINT_TIME(PageSearchWaitTime, blocks);
+#define PRINT_MAP_TIME(blocks) PRINT_TIME(MapTime, blocks);
+#define PRINT_COPY_BLOCK_TIME(blocks) PRINT_TIME(CopyBlockTime, blocks);
+#define PRINT_PAGE_READ_TIME(blocks) PRINT_TIME(PageReadTime, blocks);
+#define PRINT_PAGE_ALLOC_TIME(blocks) PRINT_TIME(PageAllocTime, blocks);
+#define PRINT_FILE_OPEN_TIME(blocks) PRINT_TIME(FileOpenTime, blocks);
+#define PRINT_FILE_CLOSE_TIME(blocks) PRINT_TIME(FileCloseTime, blocks);
+#define PRINT_CPU_READ_TIME(blocks) PRINT_TIME(CPUReadTime, blocks);
+#define PRINT_BUSY_LIST_INSERT_TIME(blocks) PRINT_TIME(BusyListInsertTime, blocks);
 
 #else
 
-#define PRINT_TIME(SYMBOL, freq, blocks)
+#define PRINT_TIME(SYMBOL, blocks)
 
 #define GET_TIME(timer)
 
 #define INIT_RT_TIMING
 
+//////////////////////////////
+// THreadblock level timers //
+//////////////////////////////
 #define KERNEL_START
-#define KERNEL_STOP
+#define KERNEL_STO
 
-#define RT_SEARCH_START
-#define RT_SEARCH_STOP
+#define PAGE_SEARCH_START
+#define PAGE_SEARCH_STOP
 
-#define RT_WAIT_START
-#define RT_WAIT_STOP
+#define PAGE_SEARCH_WAIT_START
+#define PAGE_SEARCH_WAIT_STOP
 
 #define MAP_START
 #define MAP_STOP
 
-#define PAGE_READ_START
-#define PAGE_READ_STOP
-
 #define COPY_BLOCK_START
 #define COPY_BLOCK_STOP
 
-#define PAGE_ALLOC_START_WARP
-#define PAGE_ALLOC_STOP_WARP
+#define PAGE_READ_START
+#define PAGE_READ_STOP
+
+#define PAGE_ALLOC_START
+#define PAGE_ALLOC_STOP
 
 #define FILE_OPEN_START
 #define FILE_OPEN_STOP
 
+#define FILE_CLOSE_START
+#define FILE_CLOSE_STOP
+
 #define CPU_READ_START
 #define CPU_READ_STOP
 
-#define HASH_MAP_SEARCH_START
-#define HASH_MAP_SEARCH_STOP
+#define BUSY_LIST_INSERT_START
+#define BUSY_LIST_INSERT_STOP
 
-#define PRINT_KERNEL_TIME(freq, blocks)
-#define PRINT_RT_SEARCH_TIME(freq, blocks)
-#define PRINT_RT_WAIT_TIME(freq, blocks)
-#define PRINT_MAP_TIME(freq, blocks)
-#define PRINT_PAGE_READ_TIME(freq, blocks)
-#define PRINT_COPY_BLOCK_TIME(freq, blocks)
-#define PRINT_PAGE_ALLOC_TIME(freq, blocks)
-#define PRINT_FILE_OPEN_TIME(freq, blocks)
-#define PRINT_CPU_READ_TIME(freq, blocks)
-#define PRINT_HASH_MAP_SEARCH_TIME(freq, blocks)
+///////////////////////
+// Warp level timers //
+///////////////////////
+#define KERNEL_START_WARP
+#define KERNEL_STOP_WARP
+
+#define PAGE_SEARCH_START_WARP
+#define PAGE_SEARCH_STOP_WARP
+
+#define PAGE_SEARCH_WAIT_START_WARP
+#define PAGE_SEARCH_WAIT_STOP_WARP
+
+#define MAP_START_WARP
+#define MAP_STOP_WARP
+
+#define COPY_BLOCK_START_WARP
+#define COPY_BLOCK_STOP_WARP
+
+#define PAGE_READ_START_WARP
+#define PAGE_READ_STOP_WARP
+
+#define PAGE_ALLOC_START_WARP
+#define PAGE_ALLOC_STOP_WARP
+
+#define FILE_OPEN_START_WARP
+#define FILE_OPEN_STOP_WARP
+
+#define FILE_CLOSE_START_WARP
+#define FILE_CLOSE_STOP_WARP
+
+
+#define CPU_READ_START_WARP
+#define CPU_READ_STOP_WARP
+
+#define BUSY_LIST_INSERT_START_WARP
+#define BUSY_LIST_INSERT_STOP_WARP
+
+//////////////////
+// Timers print //
+//////////////////
+#define PRINT_KERNEL_TIME(blocks)
+#define PRINT_PAGE_SEARCH_TIME(blocks)
+#define PRINT_PAGE_SEARCH_WAIT_TIME(blocks)
+#define PRINT_MAP_TIME(blocks)
+#define PRINT_COPY_BLOCK_TIME(blocks)
+#define PRINT_PAGE_READ_TIME(blocks)
+#define PRINT_PAGE_ALLOC_TIME(blocks)
+#define PRINT_FILE_OPEN_TIME(blocks)
+#define PRINT_CPU_READ_TIME(blocks)
+#define PRINT_BUSY_LIST_INSERT_TIME(blocks)
 
 #endif
 

@@ -47,15 +47,16 @@ __device__ unsigned int numHM_lockedSuccess;
 
 #ifdef TIMING_STATS
 __device__ unsigned long long KernelTime;
-__device__ unsigned long long RTSearchTime;
-__device__ unsigned long long RTWaitTime;
+__device__ unsigned long long PageSearchTime;
+__device__ unsigned long long PageSearchWaitTime;
 __device__ unsigned long long MapTime;
 __device__ unsigned long long CopyBlockTime;
 __device__ unsigned long long PageReadTime;
 __device__ unsigned long long PageAllocTime;
 __device__ unsigned long long FileOpenTime;
+__device__ unsigned long long FileCloseTime;
 __device__ unsigned long long CPUReadTime;
-__device__ unsigned long long HashMapSearchTime;
+__device__ unsigned long long BusyListInsertTime;
 #endif
 
 #ifdef DEBUG
