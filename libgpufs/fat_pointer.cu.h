@@ -22,8 +22,8 @@
 #include "fs_constants.h"
 
 // Prevent circular include
-__device__ volatile void* gmmap(void *addr, size_t size, int prot, int flags, int fd, off_t offset);
-__device__ int gmunmap( volatile void *addr, size_t length );
+__device__ volatile void* gmmap_warp(void *addr, size_t size, int prot, int flags, int fd, off_t offset);
+__device__ int gmunmap_warp( volatile void *addr, size_t length );
 
 static const unsigned int FID_BITS = 4;
 static const unsigned int VPAGE_BITS = 28;
@@ -317,10 +317,10 @@ public:
 						{
 							int oldPhysical = line.physicalPage;
 							volatile void* ptr = m_mem + ((size_t)oldPhysical << FS_LOGBLOCKSIZE);
-							gmunmap( ptr, FS_BLOCKSIZE );
+							gmunmap_warp( ptr, FS_BLOCKSIZE );
 						}
 
-						volatile void* ptr = gmmap(NULL, FS_BLOCKSIZE, 0, m_flags, m_fid, (size_t)query << FS_LOGBLOCKSIZE);
+						volatile void* ptr = gmmap_warp(NULL, FS_BLOCKSIZE, 0, m_flags, m_fid, (size_t)query << FS_LOGBLOCKSIZE);
 
 						if( laneID == 0 )
 						{

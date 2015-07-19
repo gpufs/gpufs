@@ -365,7 +365,7 @@ extern __device__ unsigned long long FileCloseTime;
 // THreadblock level timers //
 //////////////////////////////
 #define KERNEL_START
-#define KERNEL_STO
+#define KERNEL_STOP
 
 #define PAGE_SEARCH_START
 #define PAGE_SEARCH_STOP
@@ -445,6 +445,7 @@ extern __device__ unsigned long long FileCloseTime;
 #define PRINT_PAGE_READ_TIME(blocks)
 #define PRINT_PAGE_ALLOC_TIME(blocks)
 #define PRINT_FILE_OPEN_TIME(blocks)
+#define PRINT_FILE_CLOSE_TIME(blocks)
 #define PRINT_CPU_READ_TIME(blocks)
 #define PRINT_BUSY_LIST_INSERT_TIME(blocks)
 

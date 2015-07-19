@@ -334,7 +334,7 @@ DEBUG_NOINLINE __device__ volatile PFrame* getRwLockedPage( int fd, int version,
 	return pframe;
 }
 
-DEBUG_NOINLINE __device__ int gmunmap_threadblock( volatile void *addr, size_t length )
+DEBUG_NOINLINE __device__ int gmunmap( volatile void *addr, size_t length )
 {
 	size_t tmp = ( (char*) addr ) - ( (char*) g_ppool->rawStorage );
 	size_t offset = tmp >> FS_LOGBLOCKSIZE;
@@ -352,7 +352,7 @@ DEBUG_NOINLINE __device__ int gmunmap_threadblock( volatile void *addr, size_t l
 	return 0;
 }
 
-DEBUG_NOINLINE __device__ int gmunmap( volatile void *addr, size_t length )
+DEBUG_NOINLINE __device__ int gmunmap_warp( volatile void *addr, size_t length )
 {
 	size_t tmp = ( (char*) addr ) - ( (char*) g_ppool->rawStorage );
 	size_t offset = tmp >> FS_LOGBLOCKSIZE;
@@ -371,7 +371,7 @@ DEBUG_NOINLINE __device__ int gmunmap( volatile void *addr, size_t length )
 	return 0;
 }
 
-DEBUG_NOINLINE __device__ volatile void* gmmap_threadblock( void *addr, size_t size, int prot, int flags, int fd, off_t offset )
+DEBUG_NOINLINE __device__ volatile void* gmmap( void *addr, size_t size, int prot, int flags, int fd, off_t offset )
 {
 	MAP_START
 
@@ -554,7 +554,7 @@ DEBUG_NOINLINE __device__ volatile PFrame* getRwLockedPage_warp( int fd, int ver
 	return pframe;
 }
 
-DEBUG_NOINLINE __device__ volatile void* gmmap( void *addr, size_t size, int prot, int flags, int fd, off_t offset )
+DEBUG_NOINLINE __device__ volatile void* gmmap_warp( void *addr, size_t size, int prot, int flags, int fd, off_t offset )
 {
 	MAP_START_WARP
 

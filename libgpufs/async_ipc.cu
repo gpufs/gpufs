@@ -30,6 +30,7 @@ __host__ void ringbuf_page_md_init(page_md_t** cpumd, page_md_t** gpumd, int num
 		ringbuf_page_md_init(&cpu_md_ar, &gpu_md_ar_ptr, ASYNC_CLOSE_RINGBUF_SIZE);
 		ringbuf_metadata_init(&cpu_rb,&gpu_rb_ptr, ASYNC_CLOSE_RINGBUF_SIZE);
 		CUDA_SAFE_CALL(cudaMalloc((void**)&gpu_data_ar,sizeof(Page)*ASYNC_CLOSE_RINGBUF_SIZE));
+		fprintf(stderr, "gpu_data_ar: %.2fMB\n", (float)(sizeof(Page)*ASYNC_CLOSE_RINGBUF_SIZE) / (1024.f * 1024.f));
 	}
 
 __forceinline__ __device__ void async_close_rb_t::memcpy_page_req(volatile Page* dst, const volatile Page* src, size_t size){	

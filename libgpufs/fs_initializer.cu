@@ -124,6 +124,7 @@ void initializer(GPUGlobals_ptr* globals)
 
 	volatile void** temp;
 	CUDA_SAFE_CALL(cudaMalloc(&temp,sizeof(void*) * RW_HOST_WORKERS * RW_SCRATCH_PER_WORKER));
+	fprintf(stderr, "Scratch area pointers: %.2fMB\n", (float)(sizeof(void*) * RW_HOST_WORKERS * RW_SCRATCH_PER_WORKER) / (1024.f * 1024.f));
 
 	for( int i = 0; i < RW_HOST_WORKERS; ++i )
 	{
