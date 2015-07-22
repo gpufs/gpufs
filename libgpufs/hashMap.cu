@@ -93,6 +93,7 @@ DEBUG_NOINLINE __device__ volatile PFrame* HashMap::getPFrame( int fd, int versi
 		newData->file_id = fd;
 		newData->file_offset = offset;
 		newData->version = version;
+		threadfence();
 
 		frames[index] = newData;
 		threadfence();

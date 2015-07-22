@@ -106,7 +106,7 @@ END_SINGLE_THREAD
 
 DEBUG_NOINLINE __device__ int single_thread_open( const char* filename, int flags )
 {
-	GPRINT("GPU: Open file: %s\n", filename);
+//	GPRINT("GPU: Open file: %s\n", filename);
 	/*
 	 Lock ftable
 	 find entry
@@ -216,9 +216,14 @@ DEBUG_NOINLINE __device__ volatile PFrame* getRwLockedPage( int fd, int version,
 			PAGE_SEARCH_WAIT_START
 			pframe = g_hashMap->readPFrame( fd, version, block_id, busy );
 			PAGE_SEARCH_WAIT_STOP
+
+			if( pframe != NULL )
+			{
+				break;
+			}
 		}
 
-		if( pframe != NULL && !busy )
+		if( pframe != NULL )
 		{
 			HM_LOCKLESS
 			break;
@@ -443,6 +448,7 @@ DEBUG_NOINLINE __device__ volatile PFrame* getRwLockedPage_warp( int fd, int ver
 			bool busy;
 
 			// try lockless read first
+			// GDBGV("first read", block_id << FS_LOGBLOCKSIZE);
 			pframe = g_hashMap->readPFrame( fd, version, block_id, busy );
 			if( pframe != NULL && !busy )
 			{
@@ -453,13 +459,22 @@ DEBUG_NOINLINE __device__ volatile PFrame* getRwLockedPage_warp( int fd, int ver
 			// wait till it's no longer busy
 			while( busy )
 			{
+				// GDBGV("second read", block_id << FS_LOGBLOCKSIZE);
 				pframe = g_hashMap->readPFrame( fd, version, block_id, busy );
 
 				if( pframe != NULL )
+				{
 					break;
+				}
+			}
+
+			if( pframe != NULL )
+			{
+				break;
 			}
 
 			// lockless didn't work, try a more aggressive approach
+			// GDBGV("get frame", block_id << FS_LOGBLOCKSIZE);
 			pframe = g_hashMap->getPFrame( fd, version, block_id );
 			if( pframe != NULL )
 			{

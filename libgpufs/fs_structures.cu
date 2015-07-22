@@ -51,6 +51,7 @@ DEBUG_NOINLINE __device__ bool PFrame::try_lock_init() volatile
 	if( MUTEX_WAS_LOCKED(lock) )
 	{
 		// page is busy
+		// GDBG("try_lock_init busy", file_offset, refCount);
 		return false;
 	}
 
@@ -60,6 +61,7 @@ DEBUG_NOINLINE __device__ bool PFrame::try_lock_init() volatile
 		state = INIT;
 		refCount = 1;
 		threadfence();
+		// GDBG("try_lock_init", file_offset, refCount);
 		// Keep lock
 		return true;
 	}
@@ -87,6 +89,7 @@ DEBUG_NOINLINE __device__ bool PFrame::try_lock_rw( int fd, int _version, size_t
 	if( MUTEX_WAS_LOCKED(lock) )
 	{
 		// page is busy
+		// GDBG("try_lock_rw busy", offset, refCount);
 		return false;
 	}
 
@@ -97,6 +100,7 @@ DEBUG_NOINLINE __device__ bool PFrame::try_lock_rw( int fd, int _version, size_t
 			// This is the right one
 			refCount++;
 			threadfence();
+			// GDBG("try_lock_rw", offset, refCount);
 			MUTEX_UNLOCK( lock );
 			return true;
 		}
@@ -110,6 +114,7 @@ DEBUG_NOINLINE __device__ bool PFrame::try_lock_rw( int fd, int _version, size_t
 			refCount = 1;
 			version = _version;
 			threadfence();
+			// GDBG("weird", offset, refCount);
 			// Keep lock
 			return true;
 		}
@@ -126,6 +131,8 @@ DEBUG_NOINLINE __device__ void PFrame::unlock_rw() volatile
 {
 	MUTEX_LOCK( lock );
 	refCount--;
+	threadfence();
+	// GDBG("unlock_rw", file_offset, refCount);
 	MUTEX_UNLOCK( lock );
 
 //	atomicSub((int*)&refCount, 1);

@@ -20,8 +20,8 @@
 #define FS_CONSTANTS
 
 // home many ages to swapout at once
-#define NUM_PAGES_SWAPOUT (16)
-#define NUM_SWAP_RETRIES (16)
+#define NUM_PAGES_SWAPOUT (64)
+#define NUM_SWAP_RETRIES (64)
 
 #define FS_LOGBLOCKSIZE (12)
 #define FS_BLOCKSIZE ( 1 << FS_LOGBLOCKSIZE )

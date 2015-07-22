@@ -63,16 +63,21 @@ DEBUG_NOINLINE __device__ volatile PFrame* PPool::allocPage() volatile
 		return pFrame;
 	}
 
-	// else, we are out of memory
+	// else, we are almost out of memory
 	if( MUTEX_TRY_LOCK(swapLock) )
 	{
+//		GDBGV("swapping", oldSize);
+//		GPRINT("%d\n", oldSize);
+
 		// swap
 		uint numSwapped = 0;
 		int numRetries = 0;
+		uint candLoc = tail;
 
+//		GDBGV("candLoc", candLoc);
 		while( NUM_PAGES_SWAPOUT > numSwapped )
 		{
-			volatile PFrame* cand = &( frames[freeList[tail]] );
+			volatile PFrame* cand = &( frames[freeList[candLoc]] );
 
 			// Try to remove from the hash
 			bool removed = false;
@@ -84,15 +89,36 @@ DEBUG_NOINLINE __device__ volatile PFrame* PPool::allocPage() volatile
 
 			if( removed )
 			{
+//				GDBGV("candLoc", candLoc);
+				if( candLoc != tail )
+				{
+					// swap tail and current location
+					uint t = freeList[tail];
+					freeList[tail] = freeList[candLoc];
+					freeList[candLoc] = t;
+
+					threadfence();
+				}
+
 				freePage( cand );
 				numSwapped++;
+				candLoc = ( candLoc + 1 ) % PPOOL_FRAMES;
 				continue;
 			}
 
 			// else
+			// move it down the ring buffer since it's busy
+//			uint moveLoc = ( candLoc + (PPOOL_FRAMES / 4) ) % PPOOL_FRAMES;
+//			uint t = freeList[moveLoc];
+//			freeList[moveLoc] = freeList[candLoc];
+//			freeList[candLoc] = t;
+//
+//			threadfence();
+
 			// Search for another one
+
 			// In this case we will need to swap the element in tail to prevent loosing it later
-			uint candLoc = ( tail + 1 ) % PPOOL_FRAMES;
+			candLoc = ( candLoc + 1 ) % PPOOL_FRAMES;
 
 			while( (NUM_SWAP_RETRIES > numRetries) || (0 == numSwapped) )
 			{
@@ -107,6 +133,7 @@ DEBUG_NOINLINE __device__ volatile PFrame* PPool::allocPage() volatile
 
 				if( removed )
 				{
+//					GDBGV("candLoc", candLoc);
 					// swap tail and current location
 					uint t = freeList[tail];
 					freeList[tail] = freeList[candLoc];
@@ -116,8 +143,17 @@ DEBUG_NOINLINE __device__ volatile PFrame* PPool::allocPage() volatile
 
 					freePage( cand );
 					numSwapped++;
+					candLoc = ( candLoc + 1 ) % PPOOL_FRAMES;
 					break;
 				}
+
+				// move it down the ring buffer since it's busy
+//				uint moveLoc = ( candLoc + (PPOOL_FRAMES / 4) ) % PPOOL_FRAMES;
+//				uint t = freeList[moveLoc];
+//				freeList[moveLoc] = freeList[candLoc];
+//				freeList[candLoc] = t;
+//
+//				threadfence();
 
 				candLoc = ( candLoc + 1 ) % PPOOL_FRAMES;
 				numRetries++;
@@ -133,6 +169,9 @@ DEBUG_NOINLINE __device__ volatile PFrame* PPool::allocPage() volatile
 
 		GPU_ASSERT( numSwapped > 0 );
 
+//		GDBGV("numSwapped", numSwapped);
+//		GDBGV("numRetries", numRetries);
+
 		uint freeLoc = atomicInc( (uint*) &head, PPOOL_FRAMES - 1 );
 		volatile PFrame* pFrame = &( frames[freeList[freeLoc]] );
 
@@ -146,11 +185,23 @@ DEBUG_NOINLINE __device__ volatile PFrame* PPool::allocPage() volatile
 
 		return pFrame;
 	}
+	else if( 0 < oldSize )
+	{
+		uint freeLoc = atomicInc( (uint*) &head, PPOOL_FRAMES - 1 );
+		volatile PFrame* pFrame = &( frames[freeList[freeLoc]] );
+
+		GPU_ASSERT( freeList[freeLoc] == pFrame->rs_offset );
+
+		PAGE_ALLOC_STOP_WARP
+
+		return pFrame;
+	}
 	else
 	{
 		// Not enough memory, and someone is already swapping
 		// Abort
-		atomicAdd( (int*) &size, 1 );
+		int old = atomicAdd( (int*) &size, 1 );
+//		GDBGV("Revert malloc", old);
 		return NULL;
 	}
 }
