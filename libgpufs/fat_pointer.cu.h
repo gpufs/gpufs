@@ -32,13 +32,6 @@ __forceinline__ __device__ unsigned long long getTicks()
 	return ticks;
 }
 
-__forceinline__ __device__ unsigned long long getTicks()
-{
-	unsigned long long ticks;
-	asm volatile ("mov.u64 %0, %%clock64;" : "=l"(ticks) :);
-	return ticks;
-}
-
 __forceinline__ __device__ int acc2Bitfeild( int acc )
 {
 	switch (acc) {
