@@ -46,7 +46,7 @@ DEBUG_NOINLINE __device__ void PFrame::clean() volatile
 	dirtyCounter = 0;
 }
 
-DEBUG_NOINLINE __device__ bool PFrame::try_lock_init() volatile
+DEBUG_NOINLINE __device__ bool PFrame::try_lock_init(int ref) volatile
 {
 	if( MUTEX_WAS_LOCKED(lock) )
 	{
@@ -59,7 +59,7 @@ DEBUG_NOINLINE __device__ bool PFrame::try_lock_init() volatile
 	{
 		// We are the ones initiating this page
 		state = INIT;
-		refCount = 1;
+		refCount = ref;
 		threadfence();
 		// GDBG("try_lock_init", file_offset, refCount);
 		// Keep lock
@@ -84,7 +84,7 @@ DEBUG_NOINLINE __device__ void PFrame::unlock_init() volatile
 
 
 
-DEBUG_NOINLINE __device__ bool PFrame::try_lock_rw( int fd, int _version, size_t offset ) volatile
+DEBUG_NOINLINE __device__ bool PFrame::try_lock_rw( int fd, int _version, size_t offset, int ref ) volatile
 {
 	if( MUTEX_WAS_LOCKED(lock) )
 	{
@@ -98,7 +98,7 @@ DEBUG_NOINLINE __device__ bool PFrame::try_lock_rw( int fd, int _version, size_t
 		if( version == _version )
 		{
 			// This is the right one
-			refCount++;
+			refCount += ref;
 			threadfence();
 			// GDBG("try_lock_rw", offset, refCount);
 			MUTEX_UNLOCK( lock );
@@ -111,7 +111,7 @@ DEBUG_NOINLINE __device__ bool PFrame::try_lock_rw( int fd, int _version, size_t
 			GPU_ASSERT( refCount == 0 );
 
 			state = UPDATING;
-			refCount = 1;
+			refCount = ref;
 			version = _version;
 			threadfence();
 			// GDBG("weird", offset, refCount);
@@ -127,15 +127,20 @@ DEBUG_NOINLINE __device__ bool PFrame::try_lock_rw( int fd, int _version, size_t
 	}
 }
 
-DEBUG_NOINLINE __device__ void PFrame::unlock_rw() volatile
+DEBUG_NOINLINE __device__ void PFrame::unlock_rw(int ref) volatile
 {
 	MUTEX_LOCK( lock );
-	refCount--;
+	refCount -= ref;
 	threadfence();
 	// GDBG("unlock_rw", file_offset, refCount);
 	MUTEX_UNLOCK( lock );
+}
 
-//	atomicSub((int*)&refCount, 1);
+DEBUG_NOINLINE __device__ void PFrame::lock_rw(int ref) volatile
+{
+	MUTEX_LOCK( lock );
+	refCount += ref;
+	MUTEX_UNLOCK( lock );
 }
 
 DEBUG_NOINLINE __device__ bool PFrame::try_invalidate( int fd, size_t offset ) volatile

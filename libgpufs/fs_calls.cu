@@ -357,7 +357,7 @@ DEBUG_NOINLINE __device__ int gmunmap( volatile void *addr, size_t length )
 	return 0;
 }
 
-DEBUG_NOINLINE __device__ int gmunmap_warp( volatile void *addr, size_t length )
+DEBUG_NOINLINE __device__ int gmunmap_warp( volatile void *addr, size_t length, int ref )
 {
 	size_t tmp = ( (char*) addr ) - ( (char*) g_ppool->rawStorage );
 	size_t offset = tmp >> FS_LOGBLOCKSIZE;
@@ -370,7 +370,7 @@ DEBUG_NOINLINE __device__ int gmunmap_warp( volatile void *addr, size_t length )
 	if( laneid == 0 )
 	{
 		volatile PFrame* p = &( g_ppool->frames[offset] );
-		p->unlock_rw();
+		p->unlock_rw(ref);
 	}
 
 	return 0;
@@ -431,7 +431,7 @@ DEBUG_NOINLINE __device__ volatile void* gmmap( void *addr, size_t size, int pro
 	return (void*) ( ( (uchar*) ( pframe->page ) ) + block_offset );
 }
 
-DEBUG_NOINLINE __device__ volatile PFrame* getRwLockedPage_warp( int fd, int version, size_t block_id, int cpu_fd, int purpose )
+DEBUG_NOINLINE __device__ volatile PFrame* getRwLockedPage_warp( int fd, int version, size_t block_id, int cpu_fd, int purpose, int ref = 1 )
 {
 	BroadcastHelper broadcastHelper;
 
@@ -449,7 +449,7 @@ DEBUG_NOINLINE __device__ volatile PFrame* getRwLockedPage_warp( int fd, int ver
 
 			// try lockless read first
 			// GDBGV("first read", block_id << FS_LOGBLOCKSIZE);
-			pframe = g_hashMap->readPFrame( fd, version, block_id, busy );
+			pframe = g_hashMap->readPFrame( fd, version, block_id, busy, ref );
 			if( pframe != NULL && !busy )
 			{
 				break;
@@ -460,7 +460,7 @@ DEBUG_NOINLINE __device__ volatile PFrame* getRwLockedPage_warp( int fd, int ver
 			while( busy )
 			{
 				// GDBGV("second read", block_id << FS_LOGBLOCKSIZE);
-				pframe = g_hashMap->readPFrame( fd, version, block_id, busy );
+				pframe = g_hashMap->readPFrame( fd, version, block_id, busy, ref );
 
 				if( pframe != NULL )
 				{
@@ -475,7 +475,7 @@ DEBUG_NOINLINE __device__ volatile PFrame* getRwLockedPage_warp( int fd, int ver
 
 			// lockless didn't work, try a more aggressive approach
 			// GDBGV("get frame", block_id << FS_LOGBLOCKSIZE);
-			pframe = g_hashMap->getPFrame( fd, version, block_id );
+			pframe = g_hashMap->getPFrame( fd, version, block_id, ref );
 			if( pframe != NULL )
 			{
 				break;
@@ -553,8 +553,7 @@ DEBUG_NOINLINE __device__ volatile PFrame* getRwLockedPage_warp( int fd, int ver
 
 	//fill the page with zeros - optimization for the case of write-once exclusive create owned by GPU
 	// TODO: implement a warp level version
-	GPU_ASSERT(false);
-	bzero_page( (volatile char*) pframe->page );
+	bzero_page_warp( (volatile char*) pframe->page );
 	__threadfence(); // make sure all threads will see these zeros
 
 	if( laneid == 0 )
@@ -569,7 +568,7 @@ DEBUG_NOINLINE __device__ volatile PFrame* getRwLockedPage_warp( int fd, int ver
 	return pframe;
 }
 
-DEBUG_NOINLINE __device__ volatile void* gmmap_warp( void *addr, size_t size, int prot, int flags, int fd, off_t offset )
+DEBUG_NOINLINE __device__ volatile void* gmmap_warp( void *addr, size_t size, int prot, int flags, int fd, off_t offset, int ref )
 {
 	MAP_START_WARP
 
@@ -606,7 +605,7 @@ DEBUG_NOINLINE __device__ volatile void* gmmap_warp( void *addr, size_t size, in
 	cpu_fd = broadcast( cpu_fd );
 
 	int purpose = ( g_ftable->files[fd].flags == O_GRDONLY ) ? PAGE_READ_ACCESS : PAGE_WRITE_ACCESS;
-	pframe = getRwLockedPage_warp( fd, g_ftable->files[fd].version, block_id, cpu_fd, purpose );
+	pframe = getRwLockedPage_warp( fd, g_ftable->files[fd].version, block_id, cpu_fd, purpose, ref );
 
 //	printf("block_id: %ld, block_offset: %d, pframe: %lx\n", block_id, block_offset, pframe->page);
 

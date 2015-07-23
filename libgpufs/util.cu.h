@@ -68,8 +68,16 @@ __forceinline__ __device__ void bzero_thread(volatile void* dst, uint size)
 	}
 
 }
+
 __forceinline__ __device__ void bzero_page(volatile char* dst){
 	for(int i=TID;i<FS_BLOCKSIZE>>3;i+=blockDim.x*blockDim.y){
+		((volatile double*)dst)[i]=0;
+	}
+}
+
+__forceinline__ __device__ void bzero_page_warp(volatile char* dst){
+	for( int i=LANE_ID; i<FS_BLOCKSIZE>>3; i += 32 )
+	{
 		((volatile double*)dst)[i]=0;
 	}
 }
@@ -356,12 +364,12 @@ union BroadcastHelper
 	int i[2];
 };
 
-__device__ inline BroadcastHelper broadcast(BroadcastHelper b)
+__device__ inline BroadcastHelper broadcast(BroadcastHelper b, int leader = 0)
 {
 	BroadcastHelper t;
 
-	t.i[0] = __shfl( b.i[0], 0 );
-	t.i[1] = __shfl( b.i[1], 0 );
+	t.i[0] = __shfl( b.i[0], leader );
+	t.i[1] = __shfl( b.i[1], leader );
 
 	return t;
 }
