@@ -47,11 +47,12 @@ public:
 	__device__ void init_thread( volatile Page* _page, int _rs_offset ) volatile;
 	__device__ void clean() volatile;
 
-	__device__ bool try_lock_init() volatile;
+	__device__ bool try_lock_init(int ref = 1) volatile;
 	__device__ void unlock_init() volatile;
 
-	__device__ bool try_lock_rw( int fd, int version, size_t offset ) volatile;
-	__device__ void unlock_rw() volatile;
+	__device__ bool try_lock_rw( int fd, int version, size_t offset, int ref = 1 ) volatile;
+	__device__ void unlock_rw(int ref = 1) volatile;
+	__device__ void lock_rw(int ref = 1) volatile;
 
 	__device__ bool try_invalidate( int fd, size_t offset ) volatile;
 

@@ -73,6 +73,7 @@ __forceinline__ __device__ void bzero_thread(volatile void* dst, uint size)
 	}
 
 }
+
 __forceinline__ __device__ void bzero_page(volatile char* dst){
 	for(int i=TID;i<FS_BLOCKSIZE>>3;i+=blockDim.x*blockDim.y){
 		((volatile double*)dst)[i]=0;

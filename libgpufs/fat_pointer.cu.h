@@ -20,10 +20,17 @@
 
 #include <limits.h>
 #include "fs_constants.h"
+#include "util.cu.h"
 
 // Prevent circular include
-__device__ volatile void* gmmap_warp(void *addr, size_t size, int prot, int flags, int fd, off_t offset);
-__device__ int gmunmap_warp( volatile void *addr, size_t length );
+__device__ volatile void* gmmap_warp(void *addr, size_t size, int prot, int flags, int fd, off_t offset, int ref);
+
+__forceinline__ __device__ unsigned long long getTicks()
+{
+	unsigned long long ticks;
+	asm volatile ("mov.u64 %0, %%clock64;" : "=l"(ticks) :);
+	return ticks;
+}
 
 __forceinline__ __device__ unsigned long long getTicks()
 {
@@ -56,28 +63,65 @@ __forceinline__ __device__ int bitfeild2Acc( int bits )
 	}
 }
 
-static const unsigned int ACCESS_BITS = 3;
-static const unsigned int VPAGE_BITS = 64 - 32 - 1 - ACCESS_BITS; // 28
+static const unsigned long long int ACCESS_BITS = 3;
+static const unsigned long long int VALID_BITS = 1;
+static const unsigned long long int PAGE_BITS = 64 - FS_LOGBLOCKSIZE - ACCESS_BITS - VALID_BITS;
 
-static const unsigned int FID_BITS = 64 - (32 - FS_LOGBLOCKSIZE) - VPAGE_BITS;
+static const unsigned long long int FID_BITS = 128 - PAGE_BITS - PAGE_BITS;
 
-static const unsigned int INVALID_VPAGE = (1 << VPAGE_BITS) - 1;
-static const unsigned int INVALID_FID = (1 << FID_BITS) - 1;
+static const unsigned long long int INVALID_VPAGE = 0x1FFFFFFFFFFFF;
+static const unsigned long long int INVALID_FID = 0xFFFFFFFF;
+
+//struct __align__(8) _PhysicalPtr
+//{
+//	unsigned int pageOffset : FS_LOGBLOCKSIZE;
+//	unsigned int physPage : PAGE_BITS;
+//	unsigned int accBits : ACCESS_BITS;
+//	unsigned int valid : VALID_BITS;
+//};
+//
+//struct __align__(8) _VirtualPtr
+//{
+//	unsigned int pageOffset : FS_LOGBLOCKSIZE;
+//	unsigned int virtPage : PAGE_BITS;
+//	unsigned int accBits : ACCESS_BITS;
+//	unsigned int valid : VALID_BITS;
+//};
+//
+//union __align__(8) _FatPtr
+//{
+//	int64_t i;
+//	_VirtualPtr vp;
+//	_PhysicalPtr pp;
+//}
 
 struct __align__(8) _FatPtr
 {
-	unsigned int pageOffset 	: FS_LOGBLOCKSIZE;
-	unsigned int physicalPage 	: (32 - FS_LOGBLOCKSIZE);
-	unsigned int vpage 			: VPAGE_BITS;
-	unsigned int accBits 		: ACCESS_BITS;
-	unsigned int valid 			: 1;
+	union
+	{
+		struct
+		{
+			unsigned int pageOffset : FS_LOGBLOCKSIZE;
+			unsigned long long int physPage : PAGE_BITS;
+		};
+
+		struct
+		{
+			unsigned int virtPageOffset : FS_LOGBLOCKSIZE;
+			unsigned long long int virtPage : PAGE_BITS;
+		};
+
+		unsigned long long int offset : FS_LOGBLOCKSIZE + PAGE_BITS;
+	};
+	unsigned int accBits : ACCESS_BITS;
+	unsigned int valid : VALID_BITS;
 };
 
-struct __align__(8) _TlbLine
+struct __align__(16) _TlbLine
 {
-	unsigned int physicalPage : (32 - FS_LOGBLOCKSIZE);
-	unsigned int vpage : VPAGE_BITS;
-	unsigned int fid : FID_BITS;
+	unsigned long long int physPage : PAGE_BITS;
+	unsigned long long int virtPage : PAGE_BITS;
+	unsigned long long int fid : FID_BITS;
 };
 
 template<int N>
@@ -92,9 +136,9 @@ struct TLB
 		{
 			for( int i = WARP_ID; i < N; i += NUM_WARPS )
 			{
-//				DBGT( "i", WARP_ID, i, threadIdx.x );
-				lines[i].physicalPage = 0;
-				lines[i].vpage = INVALID_VPAGE;
+				DBGT( "i", WARP_ID, i, threadIdx.x );
+				lines[i].physPage = 0;
+				lines[i].virtPage = INVALID_VPAGE;
 				lines[i].fid = INVALID_FID;
 				locks[i] = 0;
 			}
@@ -103,13 +147,13 @@ struct TLB
 
 	__device__ ~TLB()
 	{
-		if( threadIdx.x == 0 )
+		if( LANE_ID == 0 )
 		{
-			for( int i = threadIdx.y; i < N; i += blockDim.y )
+			for( int i = WARP_ID; i < N; i += NUM_WARPS )
 			{
 				if( lines[i].fid != INVALID_FID )
 				{
-					g_ppool->frames[lines[i].physicalPage].unlock_rw();
+					g_ppool->frames[lines[i].physPage].unlock_rw();
 				}
 			}
 		}
@@ -121,36 +165,27 @@ class FatPointer
 {
 public:
 	__device__ FatPointer( size_t fid, off_t start, size_t size, int flags, TLB<N>* tlb, uchar* mem, volatile PFrame* frames ) :
-	m_fid(fid), m_start(start), m_end(start + size)
+	m_fid(fid), m_start(start), m_end(start + size), m_flags(flags)
 	{
-		m_ptr.pageOffset 	= 0;
-		m_ptr.physicalPage 	= 0;
-		m_ptr.vpage 		= start >> FS_LOGBLOCKSIZE;
-		m_ptr.accBits 		= acc2Bitfeild( flags );
-		m_ptr.valid 		= 0;
+		m_ptr.virtPage = start >> FS_LOGBLOCKSIZE;
+		m_ptr.valid = 0;
+		m_ptr.pageOffset = 0;
+		m_ptr.accBits = acc2Bitfeild( flags );
 
 		m_tlb = tlb;
 
 		m_mem = mem;
 		m_frames = (PFrame*)frames;
-
-//		time1 = 0;
-//		time2 = 0;
-//		time3 = 0;
-//		time4 = 0;
-//
-//		count1 = 0;
-//		count2 = 0;
-//		count3 = 0;
-//		count4 = 0;
 	}
 
 	__device__ FatPointer( const FatPointer& ptr ) :
-		m_fid(ptr.m_fid), m_start(ptr.m_start), m_end(ptr.m_end), m_ptr(ptr.m_ptr),
-		m_tlb(ptr.m_tlb), m_mem(ptr.m_mem), m_frames(ptr.m_frames)
+	m_fid(ptr.m_fid), m_start(ptr.m_start), m_end(ptr.m_end), m_ptr(ptr.m_ptr),
+	m_tlb(ptr.m_tlb), m_mem(ptr.m_mem), m_frames(ptr.m_frames), m_flags(ptr.m_flags)
 	{
 		// Copies are invalid by definition
 		m_ptr.valid = 0;
+
+		// TODO: update virtual address in case of physical pointer
 	}
 
 	__device__ ~FatPointer()
@@ -158,7 +193,8 @@ public:
 		if( m_ptr.valid )
 		{
 			// Decrease ref count since we no longer hold the page
-			size_t h = hash( m_ptr.vpage );
+			size_t virtPage = m_frames[m_ptr.physPage].file_offset >> FS_LOGBLOCKSIZE;
+			size_t h = hash( virtPage );
 			int old = atomicSub( (int*)&(m_tlb->locks[h]), 1 );
 		}
 	}
@@ -168,16 +204,14 @@ public:
 		m_fid = ptr.m_fid;
 		m_start = ptr.m_start;
 		m_end = ptr.m_end;
+		m_flags = ptr.m_flags;
 
-		m_ptr.vpage = ptr.m_ptr.vpage;
-		m_ptr.physicalPage = ptr.m_ptr.physicalPage;
-		m_ptr.pageOffset = ptr.m_ptr.pageOffset;
+		m_ptr = ptr.m_ptr;
 
 		// Copies are invalid by definition
 		m_ptr.valid = 0;
 
 		m_tlb = ptr.m_tlb;
-
 		m_mem = ptr.m_mem;
 		m_frames = ptr.m_frames;
 
@@ -189,11 +223,67 @@ public:
 	{
 		if( m_ptr.valid )
 		{
+			// Keeping this pointer valid will require getting it's virtual address from the buffer cache
+			// The chances that this pointer will remain valid are slim and I don't think it's worth the overhead
+
+			m_ptr.valid = 0;
+
+			bool resolved = false;
+
+			while( !resolved )
+			{
+				// Gather every thread that needs the same page
+				int invalidThreads = __ballot( 1 );
+
+				int leader = __ffs( invalidThreads );
+
+				// Correction because __ffs start counting from 1;
+				leader -= 1;
+
+				BroadcastHelper bHelper;
+				bHelper.l = m_ptr.physPage;
+				bHelper = broadcast( bHelper, leader );
+
+				int want = (m_ptr.physPage == bHelper.l);
+				int wantThreads = __ballot( want );
+				int numWants = __popc( wantThreads );
+
+				if( LANE_ID == leader )
+				{
+					// Decrease ref count since we no longer hold the page
+					size_t virtPage = m_frames[m_ptr.physPage].file_offset >> FS_LOGBLOCKSIZE;
+					size_t h = hash( virtPage );
+					DBGT( "moveTo h", WARP_ID, h, 0 );
+					int old = atomicSub( (int*)&(m_tlb->locks[h]), numWants );
+				}
+
+				if( want )
+				{
+					resolved = true;
+				}
+			}
+
+			// Fall through
+		}
+
+		m_ptr.virtPage = (m_start + offset) >> FS_LOGBLOCKSIZE;
+		m_ptr.pageOffset = (m_start + offset) & FS_BLOCKMASK;
+
+		return *this;
+	}
+
+	// Move to offset from current location
+	__forceinline__ __device__ FatPointer& move( size_t offset )
+	{
+		offset *= sizeof(T);
+
+		if( m_ptr.valid )
+		{
 			// Try to keep it valid
-			if( m_ptr.vpage == (m_start + offset) >> FS_LOGBLOCKSIZE )
+			if( 0 == ((m_ptr.pageOffset + offset) >> FS_LOGBLOCKSIZE) )
 			{
 				// We're still in the same block, just update the physical offset
-				m_ptr.pageOffset = (m_start + offset) & FS_BLOCKMASK;
+				m_ptr.pageOffset += offset;
 				return *this;
 			}
 
@@ -212,66 +302,41 @@ public:
 				// Correction because __ffs start counting from 1;
 				leader -= 1;
 
-				int query = m_ptr.physicalPage;
-				query = broadcast( query, leader );
+				BroadcastHelper bHelper;
+				bHelper.l = m_ptr.physPage;
+				bHelper = broadcast( bHelper, leader );
 
-				int want = (m_ptr.physicalPage == query);
+				int want = (m_ptr.physPage == bHelper.l);
 				int wantThreads = __ballot( want );
 				int numWants = __popc( wantThreads );
 
+				long long virtPage;
+
 				if( LANE_ID == leader )
 				{
+					// We're valid so we only have the physical page, get the virtual from the buffer cache
+					virtPage = m_frames[m_ptr.physPage].file_offset >> FS_LOGBLOCKSIZE;
+
 					// Decrease ref count since we no longer hold the page
-					size_t h = hash( m_ptr.vpage );
+					size_t h = hash( virtPage );
+					DBGT( "move h", WARP_ID, h, 0 );
 					int old = atomicSub( (int*)&(m_tlb->locks[h]), numWants );
 				}
 
+				bHelper.l = virtPage;
+				bHelper = broadcast( bHelper, leader );
+
 				if( want )
 				{
+					m_ptr.virtPage = bHelper.l;
 					resolved = true;
 				}
 			}
-
 			// Fall through
 		}
 
-		m_ptr.vpage = (m_start + offset) >> FS_LOGBLOCKSIZE;
-		m_ptr.pageOffset = (m_start + offset) & FS_BLOCKMASK;
-
-		// We can leave physicalPage as it is cause it's invalid anyway
-
-		return *this;
-	}
-
-	// Move to offset from current location
-	__device__ FatPointer& move( size_t offset )
-	{
-		offset *= sizeof(T);
-
-		if( m_ptr.valid )
-		{
-			// Try to keep it valid
-			if( 0 == ((m_ptr.pageOffset + offset) >> FS_LOGBLOCKSIZE) )
-			{
-				// We're still in the same block, just update the physical offset
-				m_ptr.pageOffset += offset;
-				return *this;
-			}
-
-			// else
-			m_ptr.valid = 0;
-
-			// Decrease ref count since we no longer hold the page
-			size_t h = hash( m_ptr.vpage );
-			int old = atomicSub( (int*)&(m_tlb->locks[h]), 1 );
-
-			// Fall through
-		}
-
-		m_ptr.vpage = m_ptr.vpage + ((m_ptr.pageOffset + offset) >> FS_LOGBLOCKSIZE);
+		m_ptr.virtPage = m_ptr.virtPage + ((m_ptr.pageOffset + offset) >> FS_LOGBLOCKSIZE);
 		m_ptr.pageOffset = (m_ptr.pageOffset + offset) & FS_BLOCKMASK;
-
-		// We can leave physicalPage as it is cause it's invalid anyway
 
 		return *this;
 	}
@@ -280,15 +345,12 @@ public:
 	{
 //		time1Start = getTicks();
 
-		long long* t = reinterpret_cast<long long*>(&m_ptr);
-
-		int valid = (*t < 0);
+		int valid = (m_ptr.valid);
 		int allValid = __all( valid );
 
 		if( allValid )
 		{
-			int* ptr = reinterpret_cast<int*>(&m_ptr);
-			uchar* pRet = m_mem + *ptr;
+			uchar* pRet = m_mem + m_ptr.offset;
 
 //			time1Stop = getTicks();
 //			time1 += time1Stop - time1Start;
@@ -298,7 +360,7 @@ public:
 
 		while( true )
 		{
-			valid = (*t < 0);
+			valid = (m_ptr.valid);
 			int invalidThread = __ballot( !valid );
 
 			int leader = __ffs( invalidThread );
@@ -312,16 +374,18 @@ public:
 			// Correction because __ffs start counting from 1;
 			leader -= 1;
 
-			int query = m_ptr.vpage;
-			query = __shfl( query, leader );
+			BroadcastHelper bHelper;
+			bHelper.l = m_ptr.virtPage;
+			bHelper = broadcast( bHelper, leader );
 
-			int want = (m_ptr.vpage == query);
+			int want = (m_ptr.virtPage == bHelper.l);
 			int wantThreads = __ballot( want );
 			int numWants = __popc( wantThreads );
 
-			int physical = 0;
+			size_t physical = 0;
 
-			size_t h = hash( query );
+			size_t h = hash( bHelper.l );
+			DBGT( "op h", WARP_ID, h, 0 );
 			volatile _TlbLine &line = m_tlb->lines[h];
 
 			int* pRefCount = &(m_tlb->locks[h]);
@@ -331,14 +395,14 @@ public:
 			if( LANE_ID == 0 )
 			{
 				old = atomicAdd( pRefCount, numWants );
-				//DBGT( "start", WARP_ID, old, threadIdx.x );
+				DBGT( "start", WARP_ID, old, threadIdx.x );
 			}
 			old = __shfl( old, 0 );
 
-			if( (old >= 0) && (line.fid = m_fid) && (line.vpage == query) )
+			if( (old >= 0) && (line.fid == m_fid) && (line.virtPage == bHelper.l) )
 			{
 				// Found the page in the tlb
-				physical = line.physicalPage;
+				physical = line.physPage;
 			}
 			else
 			{
@@ -348,7 +412,7 @@ public:
 				if( LANE_ID == 0 )
 				{
 					old = atomicSub( pRefCount, numWants );
-					//DBGT( "revert", WARP_ID, old, threadIdx.x );
+					DBGT( "revert", WARP_ID, old, threadIdx.x );
 				}
 
 				while( true )
@@ -356,204 +420,7 @@ public:
 					if( LANE_ID == 0 )
 					{
 						old = atomicCAS(pRefCount, 0, INT_MIN);
-						//DBGT( "cas", WARP_ID, old, threadIdx.x );
-					}
-					old = __shfl( old, 0 );
-
-//					//DBGT( "o", WARP_ID, old, threadIdx.x );
-
-					if( old > 0 )
-					{
-						//DBGT( "positive", WARP_ID, *pRefCount, threadIdx.x );
-						if( (line.fid == m_fid) && (line.vpage == query) )
-						{
-							// Someone added our line? maybe?
-							if( LANE_ID == 0 )
-							{
-								old = atomicAdd( pRefCount, numWants );
-								//DBGT( "retry", WARP_ID, old, threadIdx.x );
-							}
-							old = __shfl( old, 0 );
-
-							// Let's double check
-							if( (old >= 0) && (line.fid == m_fid) && (line.vpage == query) )
-							{
-								// Found the page in the tlb
-								physical = line.physicalPage;
-								break;
-							}
-							else
-							{
-								// False alarm
-								if( LANE_ID == 0 )
-								{
-									old = atomicSub( pRefCount, numWants );
-									//DBGT( "revert retry", WARP_ID, old, threadIdx.x );
-								}
-								old = __shfl( old, 0 );
-
-								continue;
-							}
-						}
-						else
-						{
-							//DBGT( "positive-1", WARP_ID, *pRefCount, threadIdx.x );
-							// Not our page
-							continue;
-						}
-					}
-					else if( old < 0 )
-					{
-						// line is locked
-						continue;
-					}
-					else
-					{
-						// We locked the page, now we can do whatever we want
-						// First check if we are evicting an existing map
-						if( line.fid != INVALID_FID )
-						{
-							if( LANE_ID == 0 )
-							{
-								m_frames[line.physicalPage].unlock_rw();
-							}
-						}
-
-//						time2Start = getTicks();
-						volatile void* ptr = gmmap_warp(NULL, FS_BLOCKSIZE, 0, bitfeild2Acc( m_ptr.accBits ), m_fid, (size_t)query << FS_LOGBLOCKSIZE);
-//						time2Stop = getTicks();
-//						count1++;
-//						time2 += time2Stop - time2Start;
-
-						if( LANE_ID == 0 )
-						{
-							physical = ((size_t)ptr - (size_t)m_mem) >> FS_LOGBLOCKSIZE;
-
-
-							line.fid = m_fid;
-							line.vpage = query;
-							line.physicalPage = physical;
-						}
-
-						threadfence();
-
-						if( LANE_ID == 0 )
-						{
-							old = atomicAdd(pRefCount, numWants - INT_MIN);
-							//DBGT( "unlock", WARP_ID, old, threadIdx.x );
-//							GDBG( "numWants", WARP_ID, numWants );
-//							GDBG( "pRefCount", WARP_ID, *pRefCount );
-						}
-
-						break;
-					}
-				}
-			}
-
-			physical = __shfl( physical, 0 );
-
-			if( want )
-			{
-				m_ptr.physicalPage = physical;
-				m_ptr.valid = 1;
-			}
-		}
-
-		int* ptr = reinterpret_cast<int*>(&m_ptr);
-		uchar* pRet = m_mem + *ptr;
-
-//		time1Stop = getTicks();
-//		time1 += time1Stop - time1Start;
-
-		return *((T*)pRet);
-	}
-
-	__forceinline__ __device__ T read()
-	{
-//		time1Start = getTicks();
-		if( ( m_ptr.accBits & 0x1 ) == 0 )
-		{
-			GPU_ASSERT(false);
-			return 0;
-		}
-
-		long long* t = reinterpret_cast<long long*>(&m_ptr);
-
-		int valid = (*t < 0);
-		int allValid = __all( valid );
-
-		if( allValid )
-		{
-			int* ptr = reinterpret_cast<int*>(&m_ptr);
-			uchar* pRet = m_mem + *ptr;
-
-//			time1Stop = getTicks();
-//			time1 += time1Stop - time1Start;
-
-			return *((T*)pRet);
-		}
-
-		while( true )
-		{
-			valid = (*t < 0);
-			int invalidThread = __ballot( !valid );
-
-			int leader = __ffs( invalidThread );
-
-			if( 0 == leader )
-			{
-				// No invalid threads
-				break;
-			}
-
-			// Correction because __ffs start counting from 1;
-			leader -= 1;
-
-			int query = m_ptr.vpage;
-			query = __shfl( query, leader );
-
-			int want = (m_ptr.vpage == query);
-			int wantThreads = __ballot( want );
-			int numWants = __popc( wantThreads );
-
-			int physical = 0;
-
-			size_t h = hash( query );
-			volatile _TlbLine &line = m_tlb->lines[h];
-
-			int* pRefCount = &(m_tlb->locks[h]);
-
-			int old;
-
-			if( LANE_ID == 0 )
-			{
-				old = atomicAdd( pRefCount, numWants );
-				//DBGT( "start", WARP_ID, old, threadIdx.x );
-			}
-			old = __shfl( old, 0 );
-
-			if( (old >= 0) && (line.fid == m_fid) && (line.vpage == query) )
-			{
-				// Found the page in the tlb
-				physical = line.physicalPage;
-			}
-			else
-			{
-				// TODO: Add open addressing around here
-
-				// Wrong page, decrease ref count
-				if( LANE_ID == 0 )
-				{
-					old = atomicSub( pRefCount, numWants );
-					//DBGT( "revert", WARP_ID, old, threadIdx.x );
-				}
-
-				while( true )
-				{
-					if( LANE_ID == 0 )
-					{
-						old = atomicCAS(pRefCount, 0, INT_MIN);
-						//DBGT( "cas", WARP_ID, old, threadIdx.x );
+						DBGT( "cas", WARP_ID, old, threadIdx.x );
 					}
 					old = __shfl( old, 0 );
 
@@ -561,22 +428,22 @@ public:
 
 					if( old > 0 )
 					{
-						//DBGT( "positive", WARP_ID, *pRefCount, threadIdx.x );
-						if( (line.fid == m_fid) && (line.vpage == query) )
+						DBGT( "positive", WARP_ID, *pRefCount, 0 );
+						if( (line.fid == m_fid) && (line.virtPage == bHelper.l) )
 						{
 							// Someone added our line? maybe?
 							if( LANE_ID == 0 )
 							{
 								old = atomicAdd( pRefCount, numWants );
-								//DBGT( "retry", WARP_ID, old, threadIdx.x );
+								DBGT( "retry", WARP_ID, old, threadIdx.x );
 							}
 							old = __shfl( old, 0 );
 
 							// Let's double check
-							if( (old >= 0) && (line.fid == m_fid) && (line.vpage == query) )
+							if( (old >= 0) && (line.fid == m_fid) && (line.virtPage == bHelper.l) )
 							{
 								// Found the page in the tlb
-								physical = line.physicalPage;
+								physical = line.physPage;
 								break;
 							}
 							else
@@ -585,7 +452,7 @@ public:
 								if( LANE_ID == 0 )
 								{
 									old = atomicSub( pRefCount, numWants );
-									//DBGT( "revert retry", WARP_ID, old, threadIdx.x );
+									DBGT( "revert retry", WARP_ID, old, threadIdx.x );
 								}
 								old = __shfl( old, 0 );
 
@@ -594,7 +461,7 @@ public:
 						}
 						else
 						{
-							//DBGT( "positive-1", WARP_ID, *pRefCount, threadIdx.x );
+							DBGT( "positive-1", WARP_ID, *pRefCount, 0 );
 							// Not our page
 							continue;
 						}
@@ -612,12 +479,14 @@ public:
 						{
 							if( LANE_ID == 0 )
 							{
-								m_frames[line.physicalPage].unlock_rw();
+								DBGT( "fid", WARP_ID, line.fid, threadIdx.x );
+								DBGT( "virtual", WARP_ID, line.virtPage, threadIdx.x );
+								m_frames[line.physPage].unlock_rw();
 							}
 						}
 
 //						time2Start = getTicks();
-						volatile void* ptr = gmmap_warp(NULL, FS_BLOCKSIZE, 0, bitfeild2Acc( m_ptr.accBits ), m_fid, (size_t)query << FS_LOGBLOCKSIZE);
+						volatile void* ptr = gmmap_warp(NULL, FS_BLOCKSIZE, 0, bitfeild2Acc( m_ptr.accBits ), m_fid, (size_t)bHelper.l << FS_LOGBLOCKSIZE, 1);
 //						time2Stop = getTicks();
 //						count1++;
 //						time2 += time2Stop - time2Start;
@@ -628,8 +497,8 @@ public:
 
 
 							line.fid = m_fid;
-							line.vpage = query;
-							line.physicalPage = physical;
+							line.virtPage = bHelper.l;
+							line.physPage = physical;
 						}
 
 						threadfence();
@@ -637,7 +506,7 @@ public:
 						if( LANE_ID == 0 )
 						{
 							old = atomicAdd(pRefCount, numWants - INT_MIN);
-							//DBGT( "unlock", WARP_ID, old, threadIdx.x );
+							DBGT( "unlock", WARP_ID, old, threadIdx.x );
 //							GDBG( "numWants", WARP_ID, numWants );
 //							GDBG( "pRefCount", WARP_ID, *pRefCount );
 						}
@@ -651,218 +520,18 @@ public:
 
 			if( want )
 			{
-				m_ptr.physicalPage = physical;
+				m_ptr.physPage = physical;
 				m_ptr.valid = 1;
 			}
 		}
 
-		int* ptr = reinterpret_cast<int*>(&m_ptr);
-		uchar* pRet = m_mem + *ptr;
+		uchar* pRet = m_mem + m_ptr.offset;
 
 //		time1Stop = getTicks();
 //		time1 += time1Stop - time1Start;
 
 		return *((T*)pRet);
 	}
-
-	__forceinline__ __device__ void write(T in)
-	{
-//		time1Start = getTicks();
-		if( ( m_ptr.accBits & 0x2 ) == 0 )
-		{
-			GPU_ASSERT(false);
-			return;
-		}
-
-		long long* t = reinterpret_cast<long long*>(&m_ptr);
-
-		int valid = (*t < 0);
-		int allValid = __all( valid );
-
-		if( allValid )
-		{
-			int* ptr = reinterpret_cast<int*>(&m_ptr);
-			uchar* pRet = m_mem + *ptr;
-
-//			time1Stop = getTicks();
-//			time1 += time1Stop - time1Start;
-
-			*((T*)pRet) = in;
-			return;
-		}
-
-		while( true )
-		{
-			valid = (*t < 0);
-			int invalidThread = __ballot( !valid );
-
-			int leader = __ffs( invalidThread );
-
-			if( 0 == leader )
-			{
-				// No invalid threads
-				break;
-			}
-
-			// Correction because __ffs start counting from 1;
-			leader -= 1;
-
-			int query = m_ptr.vpage;
-			query = __shfl( query, leader );
-
-			int want = (m_ptr.vpage == query);
-			int wantThreads = __ballot( want );
-			int numWants = __popc( wantThreads );
-
-			int physical = 0;
-
-			size_t h = hash( query );
-			volatile _TlbLine &line = m_tlb->lines[h];
-
-			int* pRefCount = &(m_tlb->locks[h]);
-
-			int old;
-
-			if( LANE_ID == 0 )
-			{
-				old = atomicAdd( pRefCount, numWants );
-				//DBGT( "start", WARP_ID, old, threadIdx.x );
-			}
-			old = __shfl( old, 0 );
-
-			if( (old >= 0) && (line.fid = m_fid) && (line.vpage == query) )
-			{
-				// Found the page in the tlb
-				physical = line.physicalPage;
-			}
-			else
-			{
-				// TODO: Add open addressing around here
-
-				// Wrong page, decrease ref count
-				if( LANE_ID == 0 )
-				{
-					old = atomicSub( pRefCount, numWants );
-					//DBGT( "revert", WARP_ID, old, threadIdx.x );
-				}
-
-				while( true )
-				{
-					if( LANE_ID == 0 )
-					{
-						old = atomicCAS(pRefCount, 0, INT_MIN);
-						//DBGT( "cas", WARP_ID, old, threadIdx.x );
-					}
-					old = __shfl( old, 0 );
-
-//					DBGT( "o", WARP_ID, old, threadIdx.x );
-
-					if( old > 0 )
-					{
-						//DBGT( "positive", WARP_ID, *pRefCount, threadIdx.x );
-						if( (line.fid == m_fid) && (line.vpage == query) )
-						{
-							// Someone added our line? maybe?
-							if( LANE_ID == 0 )
-							{
-								old = atomicAdd( pRefCount, numWants );
-								//DBGT( "retry", WARP_ID, old, threadIdx.x );
-							}
-							old = __shfl( old, 0 );
-
-							// Let's double check
-							if( (old >= 0) && (line.fid == m_fid) && (line.vpage == query) )
-							{
-								// Found the page in the tlb
-								physical = line.physicalPage;
-								break;
-							}
-							else
-							{
-								// False alarm
-								if( LANE_ID == 0 )
-								{
-									old = atomicSub( pRefCount, numWants );
-									//DBGT( "revert retry", WARP_ID, old, threadIdx.x );
-								}
-								old = __shfl( old, 0 );
-
-								continue;
-							}
-						}
-						else
-						{
-							//DBGT( "positive-1", WARP_ID, *pRefCount, threadIdx.x );
-							// Not our page
-							continue;
-						}
-					}
-					else if( old < 0 )
-					{
-						// line is locked
-						continue;
-					}
-					else
-					{
-						// We locked the page, now we can do whatever we want
-						// First check if we are evicting an existing map
-						if( line.fid != INVALID_FID )
-						{
-							if( LANE_ID == 0 )
-							{
-								m_frames[line.physicalPage].unlock_rw();
-							}
-						}
-
-//						time2Start = getTicks();
-						volatile void* ptr = gmmap_warp(NULL, FS_BLOCKSIZE, 0, bitfeild2Acc( m_ptr.accBits ), m_fid, (size_t)query << FS_LOGBLOCKSIZE);
-//						time2Stop = getTicks();
-//						count1++;
-//						time2 += time2Stop - time2Start;
-
-						if( LANE_ID == 0 )
-						{
-							physical = ((size_t)ptr - (size_t)m_mem) >> FS_LOGBLOCKSIZE;
-
-
-							line.fid = m_fid;
-							line.vpage = query;
-							line.physicalPage = physical;
-						}
-
-						threadfence();
-
-						if( LANE_ID == 0 )
-						{
-							old = atomicAdd(pRefCount, numWants - INT_MIN);
-							//DBGT( "unlock", WARP_ID, old, threadIdx.x );
-//							GDBG( "numWants", WARP_ID, numWants );
-//							GDBG( "pRefCount", WARP_ID, *pRefCount );
-						}
-
-						break;
-					}
-				}
-			}
-
-			physical = __shfl( physical, 0 );
-
-			if( want )
-			{
-				m_ptr.physicalPage = physical;
-				m_ptr.valid = 1;
-			}
-		}
-
-		int* ptr = reinterpret_cast<int*>(&m_ptr);
-		uchar* pRet = m_mem + *ptr;
-
-//		time1Stop = getTicks();
-//		time1 += time1Stop - time1Start;
-
-		*((T*)pRet) = in;
-	}
-
 
 	__device__ FatPointer& operator += ( size_t offset )
 	{
@@ -888,9 +557,11 @@ public:
 		return res;
 	}
 
+
 	size_t m_fid;	// Should be spilled to local memory
 	off_t m_start;	// Should be spilled to local memory
 	size_t m_end;	// Should be spilled to local memory
+	int m_flags;	// Should be spilled to local memory
 
 	_FatPtr m_ptr;
 
@@ -913,11 +584,6 @@ public:
 //	unsigned long long time4;
 //	unsigned long long time4Start;
 //	unsigned long long time4Stop;
-//
-//	unsigned long long count1;
-//	unsigned long long count2;
-//	unsigned long long count3;
-//	unsigned long long count4;
 };
 
 #endif

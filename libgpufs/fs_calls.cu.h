@@ -42,11 +42,11 @@ __device__ int gclose(int fd);
 __device__ int gopen(const char* filename, int flags);
 __device__ int gmsync(volatile void *addr, size_t length,int flags);
 __device__ int gmunmap(volatile void *addr, size_t length);
-__device__ int gmunmap_warp( volatile void *addr, size_t length );
+__device__ int gmunmap_warp( volatile void *addr, size_t length, int ref = 1 );
 __device__ volatile void* gmmap(void *addr, size_t size,
 		int prot, int flags, int fd, off_t offset);
 __device__ volatile void* gmmap_warp(void *addr, size_t size,
-		int prot, int flags, int fd, off_t offset);
+		int prot, int flags, int fd, off_t offset, int ref = 1);
 __device__ size_t gwrite(int fd,size_t offset, size_t size, uchar* buffer);
 __device__ size_t gread(int fd, size_t offset, size_t size, uchar* buffer);
 __device__ uint gunlink(char* filename);

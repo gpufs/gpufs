@@ -26,7 +26,7 @@ ifneq ($(dbg),1)
 	NVCC=$(CUDA_ROOT)/bin/nvcc -std=c++11 --generate-code code=sm_35,arch=compute_35 $(CUDA_INCLUDE) $(MACROS) -O3 -maxrregcount 32
 	OUTPUTDIR=release
 else
-	MACROS=-DDEBUG_NOINLINE="__noinline__" -DMALLOC_STATS -DTIMING_STATS
+	MACROS=-DDEBUG_NOINLINE="__noinline__" -DMALLOC_STATS -DTIMING_STATS -DDEBUG
 	NVCC=$(CUDA_ROOT)/bin/nvcc -std=c++11 --generate-code code=sm_35,arch=compute_35 $(CUDA_INCLUDE) $(MACROS) -O0 --device-debug --debug -g
 	OUTPUTDIR=debug
 endif
@@ -45,6 +45,7 @@ $(OUTPUTDIR)/fs_debug.o\
 $(OUTPUTDIR)/async_ipc.o\
 $(OUTPUTDIR)/generic_ringbuf.o\
 $(OUTPUTDIR)/gpufs_con_lib.o\
+$(OUTPUTDIR)/fat_pointer.o\
 
 ifneq ($(dbg),1)
 $(OUTPUTDIR)/libgpufs.a : $(GPUFS_SOURCES) | $(OUTPUTDIR)
@@ -59,6 +60,9 @@ endif
 $(OUTPUTDIR)/timer.o: timer.cpp timer.h | $(OUTPUTDIR)
 	$(CC) timer.cpp -c -o $(OUTPUTDIR)/timer.o
 
+$(OUTPUTDIR)/fat_pointer.o: fat_pointer.cu fat_pointer.cu.h fs_constants.h fs_calls.cu.h fs_debug.cu.h | $(OUTPUTDIR)
+	$(NVCC) -dc fat_pointer.cu -o $(OUTPUTDIR)/fat_pointer.o
+	
 $(OUTPUTDIR)/cpu_ipc.o: cpu_ipc.cu fs_constants.h \
 	util.cu.h  fs_debug.cu.h fs_structures.cu.h hashMap.cu.h cpu_ipc.cu.h | $(OUTPUTDIR)
 	$(NVCC) -dc cpu_ipc.cu -o $(OUTPUTDIR)/cpu_ipc.o

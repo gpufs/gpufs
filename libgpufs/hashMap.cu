@@ -38,7 +38,7 @@ DEBUG_NOINLINE __device__ void HashMap::init_thread() volatile
 	}
 }
 
-DEBUG_NOINLINE __device__ volatile PFrame* HashMap::readPFrame( int fd, int version, size_t block_id, bool& busy ) volatile
+DEBUG_NOINLINE __device__ volatile PFrame* HashMap::readPFrame( int fd, int version, size_t block_id, bool& busy, int ref ) volatile
 {
 	busy = false;
 
@@ -51,7 +51,7 @@ DEBUG_NOINLINE __device__ volatile PFrame* HashMap::readPFrame( int fd, int vers
 	{
 		if( ( it->file_id == fd ) &&  (it->file_offset == offset ) )
 		{
-			if( it->try_lock_rw( fd, version, offset ) )
+			if( it->try_lock_rw( fd, version, offset, ref ) )
 			{
 				return it;
 			}
@@ -69,7 +69,7 @@ DEBUG_NOINLINE __device__ volatile PFrame* HashMap::readPFrame( int fd, int vers
 }
 
 
-DEBUG_NOINLINE __device__ volatile PFrame* HashMap::getPFrame( int fd, int version, size_t block_id ) volatile
+DEBUG_NOINLINE __device__ volatile PFrame* HashMap::getPFrame( int fd, int version, size_t block_id, int ref ) volatile
 {
 	uint index = calcHash( fd, block_id );
 	size_t offset = block_id << FS_LOGBLOCKSIZE;
@@ -88,7 +88,7 @@ DEBUG_NOINLINE __device__ volatile PFrame* HashMap::getPFrame( int fd, int versi
 			newData = g_ppool->allocPage();
 		}
 
-		newData->try_lock_init();
+		newData->try_lock_init(ref);
 
 		newData->file_id = fd;
 		newData->file_offset = offset;
@@ -107,7 +107,7 @@ DEBUG_NOINLINE __device__ volatile PFrame* HashMap::getPFrame( int fd, int versi
 	{
 		if( ( it->file_id == fd ) &&  (it->file_offset == offset ) )
 		{
-			if( it->try_lock_rw( fd, version, offset ) )
+			if( it->try_lock_rw( fd, version, offset, ref ) )
 			{
 				MUTEX_UNLOCK( locks[index] );
 				return it;
@@ -129,7 +129,7 @@ DEBUG_NOINLINE __device__ volatile PFrame* HashMap::getPFrame( int fd, int versi
 		newData = g_ppool->allocPage();
 	}
 
-	newData->try_lock_init();
+	newData->try_lock_init(ref);
 
 	newData->file_id = fd;
 	newData->file_offset = offset;
