@@ -56,7 +56,7 @@ template<typename T, int N>
 __device__ FatPointer<T, N> gvmmap(void *addr, size_t size,
 		int prot, int flags, int fd, off_t offset, TLB<N>* tlb)
 {
-	FatPointer<T,N> ptr(fd, offset, size, flags, tlb, (uchar*)g_ppool->rawStorage);
+	FatPointer<T,N> ptr(fd, offset, size, flags, tlb, (uchar*)g_ppool->rawStorage, g_ppool->frames);
 	return ptr;
 }
 

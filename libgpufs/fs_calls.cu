@@ -553,8 +553,7 @@ DEBUG_NOINLINE __device__ volatile PFrame* getRwLockedPage_warp( int fd, int ver
 
 	//fill the page with zeros - optimization for the case of write-once exclusive create owned by GPU
 	// TODO: implement a warp level version
-	GPU_ASSERT(false);
-	bzero_page( (volatile char*) pframe->page );
+	bzero_page_warp( (volatile char*) pframe->page );
 	__threadfence(); // make sure all threads will see these zeros
 
 	if( laneid == 0 )

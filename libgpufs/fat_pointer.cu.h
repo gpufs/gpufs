@@ -42,6 +42,13 @@ struct __align__(8) _FatPtr
 	unsigned int valid : 1;
 };
 
+__forceinline__ __device__ unsigned long long getTicks()
+{
+	unsigned long long ticks;
+	asm volatile ("mov.u64 %0, %%clock64;" : "=l"(ticks) :);
+	return ticks;
+}
+
 struct __align__(8) _TlbLine
 {
 	unsigned int refCount : REF_COUNT_BITS;
@@ -70,13 +77,27 @@ struct TLB
 			}
 		}
 	}
+
+	__device__ ~TLB()
+	{
+		if( threadIdx.x == 0 )
+		{
+			for( int i = threadIdx.y; i < N; i += blockDim.y )
+			{
+				if( lines[i].fid != INVALID_FID )
+				{
+					g_ppool->frames[lines[i].physicalPage].unlock_rw();
+				}
+			}
+		}
+	}
 };
 
 template<typename T, int N>
 class FatPointer
 {
 public:
-	__device__ FatPointer( size_t fid, off_t start, size_t size, int flags, TLB<N>* tlb, uchar* mem ) :
+	__device__ FatPointer( size_t fid, off_t start, size_t size, int flags, TLB<N>* tlb, uchar* mem, volatile PFrame* frames ) :
 	m_fid(fid), m_start(start), m_end(start + size), m_flags(flags)
 	{
 		m_ptr.vpage = start >> FS_LOGBLOCKSIZE;
@@ -87,10 +108,22 @@ public:
 		m_tlb = tlb;
 
 		m_mem = mem;
+		m_frames = (PFrame*)frames;
+
+//		time1 = 0;
+//		time2 = 0;
+//		time3 = 0;
+//		time4 = 0;
+//
+//		count1 = 0;
+//		count2 = 0;
+//		count3 = 0;
+//		count4 = 0;
 	}
 
 	__device__ FatPointer( const FatPointer& ptr ) :
-	m_fid(ptr.m_fid), m_start(ptr.m_start), m_end(ptr.m_end), m_ptr(ptr.m_ptr), m_tlb(ptr.m_tlb), m_mem(ptr.m_mem), m_flags(ptr.m_flags)
+		m_fid(ptr.m_fid), m_start(ptr.m_start), m_end(ptr.m_end), m_ptr(ptr.m_ptr),
+		m_tlb(ptr.m_tlb), m_mem(ptr.m_mem), m_frames(ptr.m_frames), m_flags(ptr.m_flags)
 	{
 		// Copies are invalid by definition
 		m_ptr.valid = 0;
@@ -120,9 +153,10 @@ public:
 		// Copies are invalid by definition
 		m_ptr.valid = 0;
 
-		m_tlb = ptr.tlb;
+		m_tlb = ptr.m_tlb;
 
-		m_mem = ptr.mem;
+		m_mem = ptr.m_mem;
+		m_frames = ptr.m_frames;
 
 		return *this;
 	}
@@ -166,7 +200,7 @@ public:
 		if( m_ptr.valid )
 		{
 			// Try to keep it valid
-			if( m_ptr.vpage == m_ptr.vpage + ((m_ptr.pageOffset + offset) >> FS_LOGBLOCKSIZE) )
+			if( 0 == ((m_ptr.pageOffset + offset) >> FS_LOGBLOCKSIZE) )
 			{
 				// We're still in the same block, just update the physical offset
 				m_ptr.pageOffset += offset;
@@ -193,6 +227,8 @@ public:
 
 	__forceinline__ __device__ T& operator *()
 	{
+//		time1Start = getTicks();
+
 		long long* t = reinterpret_cast<long long*>(&m_ptr);
 
 		int valid = (*t < 0);
@@ -202,10 +238,12 @@ public:
 		{
 			int* ptr = reinterpret_cast<int*>(&m_ptr);
 			uchar* pRet = m_mem + *ptr;
+
+//			time1Stop = getTicks();
+//			time1 += time1Stop - time1Start;
+
 			return *((T*)pRet);
 		}
-
-		int laneID = TID & 0x1f;
 
 		while( true )
 		{
@@ -239,9 +277,10 @@ public:
 
 			int old;
 
-			if( laneID == 0 )
+			if( LANE_ID == 0 )
 			{
 				old = atomicAdd( pRefCount, numWants );
+				DBGT( "start", WARP_ID, old, threadIdx.x );
 			}
 			old = __shfl( old, 0 );
 
@@ -255,32 +294,38 @@ public:
 				// TODO: Add open addressing around here
 
 				// Wrong page, decrease ref count
-				if( laneID == 0 )
+				if( LANE_ID == 0 )
 				{
-					atomicSub( pRefCount, numWants );
+					old = atomicSub( pRefCount, numWants );
+					DBGT( "revert", WARP_ID, old, threadIdx.x );
 				}
 
 				while( true )
 				{
-					if( laneID == 0 )
+					if( LANE_ID == 0 )
 					{
 						old = atomicCAS(pRefCount, 0, INT_MIN);
+						DBGT( "cas", WARP_ID, old, threadIdx.x );
 					}
 					old = __shfl( old, 0 );
 
+//					DBGT( "o", WARP_ID, old, threadIdx.x );
+
 					if( old > 0 )
 					{
-						if( (line.fid = m_fid) && (line.vpage == query) )
+						DBGT( "positive", WARP_ID, *pRefCount, threadIdx.x );
+						if( (line.fid == m_fid) && (line.vpage == query) )
 						{
 							// Someone added our line? maybe?
-							if( laneID == 0 )
+							if( LANE_ID == 0 )
 							{
 								old = atomicAdd( pRefCount, numWants );
+								DBGT( "retry", WARP_ID, old, threadIdx.x );
 							}
 							old = __shfl( old, 0 );
 
 							// Let's double check
-							if( (old >= 0) && (line.fid = m_fid) && (line.vpage == query) )
+							if( (old >= 0) && (line.fid == m_fid) && (line.vpage == query) )
 							{
 								// Found the page in the tlb
 								physical = line.physicalPage;
@@ -289,9 +334,10 @@ public:
 							else
 							{
 								// False alarm
-								if( laneID == 0 )
+								if( LANE_ID == 0 )
 								{
-									atomicSub( pRefCount, numWants );
+									old = atomicSub( pRefCount, numWants );
+									DBGT( "revert retry", WARP_ID, old, threadIdx.x );
 								}
 								old = __shfl( old, 0 );
 
@@ -300,6 +346,7 @@ public:
 						}
 						else
 						{
+							DBGT( "positive-1", WARP_ID, *pRefCount, threadIdx.x );
 							// Not our page
 							continue;
 						}
@@ -315,14 +362,19 @@ public:
 						// First check if we are evicting an existing map
 						if( line.fid != INVALID_FID )
 						{
-							int oldPhysical = line.physicalPage;
-							volatile void* ptr = m_mem + ((size_t)oldPhysical << FS_LOGBLOCKSIZE);
-							gmunmap_warp( ptr, FS_BLOCKSIZE );
+							if( LANE_ID == 0 )
+							{
+								m_frames[line.physicalPage].unlock_rw();
+							}
 						}
 
+//						time2Start = getTicks();
 						volatile void* ptr = gmmap_warp(NULL, FS_BLOCKSIZE, 0, m_flags, m_fid, (size_t)query << FS_LOGBLOCKSIZE);
+//						time2Stop = getTicks();
+//						count1++;
+//						time2 += time2Stop - time2Start;
 
-						if( laneID == 0 )
+						if( LANE_ID == 0 )
 						{
 							physical = ((size_t)ptr - (size_t)m_mem) >> FS_LOGBLOCKSIZE;
 
@@ -334,9 +386,12 @@ public:
 
 						threadfence();
 
-						if( laneID == 0 )
+						if( LANE_ID == 0 )
 						{
-							atomicAdd(pRefCount, numWants - INT_MIN);
+							old = atomicAdd(pRefCount, numWants - INT_MIN);
+							DBGT( "unlock", WARP_ID, old, threadIdx.x );
+//							GDBG( "numWants", WARP_ID, numWants );
+//							GDBG( "pRefCount", WARP_ID, *pRefCount );
 						}
 
 						break;
@@ -355,6 +410,10 @@ public:
 
 		int* ptr = reinterpret_cast<int*>(&m_ptr);
 		uchar* pRet = m_mem + *ptr;
+
+//		time1Stop = getTicks();
+//		time1 += time1Stop - time1Start;
+
 		return *((T*)pRet);
 	}
 
@@ -391,6 +450,28 @@ public:
 
 	TLB<N> *m_tlb;
 	uchar* m_mem;
+	PFrame* m_frames;
+
+//	unsigned long long time1;
+//	unsigned long long time1Start;
+//	unsigned long long time1Stop;
+//
+//	unsigned long long time2;
+//	unsigned long long time2Start;
+//	unsigned long long time2Stop;
+//
+//	unsigned long long time3;
+//	unsigned long long time3Start;
+//	unsigned long long time3Stop;
+//
+//	unsigned long long time4;
+//	unsigned long long time4Start;
+//	unsigned long long time4Stop;
+//
+//	unsigned long long count1;
+//	unsigned long long count2;
+//	unsigned long long count3;
+//	unsigned long long count4;
 };
 
 #endif
