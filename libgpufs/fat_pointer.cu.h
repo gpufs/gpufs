@@ -199,9 +199,37 @@ public:
 			// else
 			m_ptr.valid = 0;
 
-			// Decrease ref count since we no longer hold the page
-			size_t h = hash( m_ptr.vpage );
-			int old = atomicSub( (int*)&(m_tlb->locks[h]), 1 );
+			bool resolved = false;
+
+			while( !resolved )
+			{
+				// Gather every thread that needs the same page
+				int invalidThreads = __ballot( 1 );
+
+				int leader = __ffs( invalidThreads );
+
+				// Correction because __ffs start counting from 1;
+				leader -= 1;
+
+				int query = m_ptr.physicalPage;
+				query = broadcast( query, leader );
+
+				int want = (m_ptr.physicalPage == query);
+				int wantThreads = __ballot( want );
+				int numWants = __popc( wantThreads );
+
+				if( LANE_ID == leader )
+				{
+					// Decrease ref count since we no longer hold the page
+					size_t h = hash( m_ptr.vpage );
+					int old = atomicSub( (int*)&(m_tlb->locks[h]), numWants );
+				}
+
+				if( want )
+				{
+					resolved = true;
+				}
+			}
 
 			// Fall through
 		}
@@ -503,7 +531,7 @@ public:
 			}
 			old = __shfl( old, 0 );
 
-			if( (old >= 0) && (line.fid = m_fid) && (line.vpage == query) )
+			if( (old >= 0) && (line.fid == m_fid) && (line.vpage == query) )
 			{
 				// Found the page in the tlb
 				physical = line.physicalPage;
