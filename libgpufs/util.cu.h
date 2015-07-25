@@ -52,7 +52,8 @@
 
 #define TID (threadIdx.x+threadIdx.y*blockDim.x+threadIdx.z*blockDim.x*blockDim.y)
 #define LANE_ID (TID & 0x1f)
-//#define TID (threadIdx.x)
+#define WARP_ID (TID >> 5)
+#define NUM_WARPS ((blockDim.x * blockDim.y * blockDim.z) >> 5)
 	
 	
 __forceinline__ __device__ void bzero_thread(volatile void* dst, uint size)
@@ -374,23 +375,23 @@ __device__ inline BroadcastHelper broadcast(BroadcastHelper b, int leader = 0)
 	return t;
 }
 
-__device__ inline int broadcast(int b)
+__device__ inline int broadcast(int b, int leader = 0)
 {
-	b = __shfl( b, 0 );
+	b = __shfl( b, leader );
 
 	return b;
 }
 
-__device__ inline unsigned int broadcast(unsigned int b)
+__device__ inline unsigned int broadcast(unsigned int b, int leader = 0)
 {
-	b = __shfl( b, 0 );
+	b = __shfl( b, leader );
 
 	return b;
 }
 
-__device__ inline float broadcast(float b)
+__device__ inline float broadcast(float b, int leader = 0)
 {
-	b = __shfl( b, 0 );
+	b = __shfl( b, leader );
 
 	return b;
 }
