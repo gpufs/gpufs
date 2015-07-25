@@ -88,10 +88,11 @@ struct TLB
 
 	__device__ TLB()
 	{
-		if( TID == 0 )
+		if( LANE_ID == 0 )
 		{
-			for( int i = 0; i < N; ++i )
+			for( int i = WARP_ID; i < N; i += NUM_WARPS )
 			{
+//				DBGT( "i", WARP_ID, i, threadIdx.x );
 				lines[i].physicalPage = 0;
 				lines[i].vpage = INVALID_VPAGE;
 				lines[i].fid = INVALID_FID;
@@ -330,7 +331,7 @@ public:
 			if( LANE_ID == 0 )
 			{
 				old = atomicAdd( pRefCount, numWants );
-				DBGT( "start", WARP_ID, old, threadIdx.x );
+				//DBGT( "start", WARP_ID, old, threadIdx.x );
 			}
 			old = __shfl( old, 0 );
 
@@ -347,7 +348,7 @@ public:
 				if( LANE_ID == 0 )
 				{
 					old = atomicSub( pRefCount, numWants );
-					DBGT( "revert", WARP_ID, old, threadIdx.x );
+					//DBGT( "revert", WARP_ID, old, threadIdx.x );
 				}
 
 				while( true )
@@ -355,22 +356,22 @@ public:
 					if( LANE_ID == 0 )
 					{
 						old = atomicCAS(pRefCount, 0, INT_MIN);
-						DBGT( "cas", WARP_ID, old, threadIdx.x );
+						//DBGT( "cas", WARP_ID, old, threadIdx.x );
 					}
 					old = __shfl( old, 0 );
 
-//					DBGT( "o", WARP_ID, old, threadIdx.x );
+//					//DBGT( "o", WARP_ID, old, threadIdx.x );
 
 					if( old > 0 )
 					{
-						DBGT( "positive", WARP_ID, *pRefCount, threadIdx.x );
+						//DBGT( "positive", WARP_ID, *pRefCount, threadIdx.x );
 						if( (line.fid == m_fid) && (line.vpage == query) )
 						{
 							// Someone added our line? maybe?
 							if( LANE_ID == 0 )
 							{
 								old = atomicAdd( pRefCount, numWants );
-								DBGT( "retry", WARP_ID, old, threadIdx.x );
+								//DBGT( "retry", WARP_ID, old, threadIdx.x );
 							}
 							old = __shfl( old, 0 );
 
@@ -387,7 +388,7 @@ public:
 								if( LANE_ID == 0 )
 								{
 									old = atomicSub( pRefCount, numWants );
-									DBGT( "revert retry", WARP_ID, old, threadIdx.x );
+									//DBGT( "revert retry", WARP_ID, old, threadIdx.x );
 								}
 								old = __shfl( old, 0 );
 
@@ -396,7 +397,7 @@ public:
 						}
 						else
 						{
-							DBGT( "positive-1", WARP_ID, *pRefCount, threadIdx.x );
+							//DBGT( "positive-1", WARP_ID, *pRefCount, threadIdx.x );
 							// Not our page
 							continue;
 						}
@@ -439,7 +440,7 @@ public:
 						if( LANE_ID == 0 )
 						{
 							old = atomicAdd(pRefCount, numWants - INT_MIN);
-							DBGT( "unlock", WARP_ID, old, threadIdx.x );
+							//DBGT( "unlock", WARP_ID, old, threadIdx.x );
 //							GDBG( "numWants", WARP_ID, numWants );
 //							GDBG( "pRefCount", WARP_ID, *pRefCount );
 						}
@@ -527,7 +528,7 @@ public:
 			if( LANE_ID == 0 )
 			{
 				old = atomicAdd( pRefCount, numWants );
-				DBGT( "start", WARP_ID, old, threadIdx.x );
+				//DBGT( "start", WARP_ID, old, threadIdx.x );
 			}
 			old = __shfl( old, 0 );
 
@@ -544,7 +545,7 @@ public:
 				if( LANE_ID == 0 )
 				{
 					old = atomicSub( pRefCount, numWants );
-					DBGT( "revert", WARP_ID, old, threadIdx.x );
+					//DBGT( "revert", WARP_ID, old, threadIdx.x );
 				}
 
 				while( true )
@@ -552,7 +553,7 @@ public:
 					if( LANE_ID == 0 )
 					{
 						old = atomicCAS(pRefCount, 0, INT_MIN);
-						DBGT( "cas", WARP_ID, old, threadIdx.x );
+						//DBGT( "cas", WARP_ID, old, threadIdx.x );
 					}
 					old = __shfl( old, 0 );
 
@@ -560,14 +561,14 @@ public:
 
 					if( old > 0 )
 					{
-						DBGT( "positive", WARP_ID, *pRefCount, threadIdx.x );
+						//DBGT( "positive", WARP_ID, *pRefCount, threadIdx.x );
 						if( (line.fid == m_fid) && (line.vpage == query) )
 						{
 							// Someone added our line? maybe?
 							if( LANE_ID == 0 )
 							{
 								old = atomicAdd( pRefCount, numWants );
-								DBGT( "retry", WARP_ID, old, threadIdx.x );
+								//DBGT( "retry", WARP_ID, old, threadIdx.x );
 							}
 							old = __shfl( old, 0 );
 
@@ -584,7 +585,7 @@ public:
 								if( LANE_ID == 0 )
 								{
 									old = atomicSub( pRefCount, numWants );
-									DBGT( "revert retry", WARP_ID, old, threadIdx.x );
+									//DBGT( "revert retry", WARP_ID, old, threadIdx.x );
 								}
 								old = __shfl( old, 0 );
 
@@ -593,7 +594,7 @@ public:
 						}
 						else
 						{
-							DBGT( "positive-1", WARP_ID, *pRefCount, threadIdx.x );
+							//DBGT( "positive-1", WARP_ID, *pRefCount, threadIdx.x );
 							// Not our page
 							continue;
 						}
@@ -636,7 +637,7 @@ public:
 						if( LANE_ID == 0 )
 						{
 							old = atomicAdd(pRefCount, numWants - INT_MIN);
-							DBGT( "unlock", WARP_ID, old, threadIdx.x );
+							//DBGT( "unlock", WARP_ID, old, threadIdx.x );
 //							GDBG( "numWants", WARP_ID, numWants );
 //							GDBG( "pRefCount", WARP_ID, *pRefCount );
 						}
@@ -725,7 +726,7 @@ public:
 			if( LANE_ID == 0 )
 			{
 				old = atomicAdd( pRefCount, numWants );
-				DBGT( "start", WARP_ID, old, threadIdx.x );
+				//DBGT( "start", WARP_ID, old, threadIdx.x );
 			}
 			old = __shfl( old, 0 );
 
@@ -742,7 +743,7 @@ public:
 				if( LANE_ID == 0 )
 				{
 					old = atomicSub( pRefCount, numWants );
-					DBGT( "revert", WARP_ID, old, threadIdx.x );
+					//DBGT( "revert", WARP_ID, old, threadIdx.x );
 				}
 
 				while( true )
@@ -750,7 +751,7 @@ public:
 					if( LANE_ID == 0 )
 					{
 						old = atomicCAS(pRefCount, 0, INT_MIN);
-						DBGT( "cas", WARP_ID, old, threadIdx.x );
+						//DBGT( "cas", WARP_ID, old, threadIdx.x );
 					}
 					old = __shfl( old, 0 );
 
@@ -758,14 +759,14 @@ public:
 
 					if( old > 0 )
 					{
-						DBGT( "positive", WARP_ID, *pRefCount, threadIdx.x );
+						//DBGT( "positive", WARP_ID, *pRefCount, threadIdx.x );
 						if( (line.fid == m_fid) && (line.vpage == query) )
 						{
 							// Someone added our line? maybe?
 							if( LANE_ID == 0 )
 							{
 								old = atomicAdd( pRefCount, numWants );
-								DBGT( "retry", WARP_ID, old, threadIdx.x );
+								//DBGT( "retry", WARP_ID, old, threadIdx.x );
 							}
 							old = __shfl( old, 0 );
 
@@ -782,7 +783,7 @@ public:
 								if( LANE_ID == 0 )
 								{
 									old = atomicSub( pRefCount, numWants );
-									DBGT( "revert retry", WARP_ID, old, threadIdx.x );
+									//DBGT( "revert retry", WARP_ID, old, threadIdx.x );
 								}
 								old = __shfl( old, 0 );
 
@@ -791,7 +792,7 @@ public:
 						}
 						else
 						{
-							DBGT( "positive-1", WARP_ID, *pRefCount, threadIdx.x );
+							//DBGT( "positive-1", WARP_ID, *pRefCount, threadIdx.x );
 							// Not our page
 							continue;
 						}
@@ -834,7 +835,7 @@ public:
 						if( LANE_ID == 0 )
 						{
 							old = atomicAdd(pRefCount, numWants - INT_MIN);
-							DBGT( "unlock", WARP_ID, old, threadIdx.x );
+							//DBGT( "unlock", WARP_ID, old, threadIdx.x );
 //							GDBG( "numWants", WARP_ID, numWants );
 //							GDBG( "pRefCount", WARP_ID, *pRefCount );
 						}

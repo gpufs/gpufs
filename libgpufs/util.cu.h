@@ -54,6 +54,10 @@
 #define LANE_ID (TID & 0x1f)
 #define WARP_ID (TID >> 5)
 #define NUM_WARPS ((blockDim.x * blockDim.y * blockDim.z) >> 5)
+#define BLOCK_ID (blockIdx.x + gridDim.x * blockIdx.y + gridDim.x * gridDim.y * blockIdx.z)
+
+#define GET_SMID( SMID ) \
+	asm volatile ("mov.u32 %0, %%smid;" : "=r"(SMID) :);
 	
 	
 __forceinline__ __device__ void bzero_thread(volatile void* dst, uint size)

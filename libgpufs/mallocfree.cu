@@ -33,10 +33,17 @@
 DEBUG_NOINLINE __device__  void PPool::init_thread(volatile Page* _storage) volatile
 {
 	rawStorage=_storage;
-	head=0;
-	tail=0;
-	swapLock=0;
-	size=PPOOL_FRAMES;
+
+	int slice = PPOOL_FRAMES / NUM_MEMORY_RINGS;
+
+	for( int i = 0; i < NUM_MEMORY_RINGS; ++i )
+	{
+		subRings[i].head = 0;
+		subRings[i].tail = 0;
+		subRings[i].swapLock = 0;
+		subRings[i].base = i * slice;
+		subRings[i].size = slice;
+	}
 
 	for(int i=0;i<PPOOL_FRAMES;i++)
 	{
@@ -49,14 +56,22 @@ DEBUG_NOINLINE __device__ volatile PFrame* PPool::allocPage() volatile
 {
 	PAGE_ALLOC_START_WARP
 
+	int ringID = BLOCK_ID % NUM_MEMORY_RINGS;
+
+	volatile uint	base = subRings[ringID].base;
+	volatile uint&	swapLock = subRings[ringID].swapLock;
+	volatile uint& 	head = subRings[ringID].head;
+	volatile uint& 	tail = subRings[ringID].tail;
+	volatile int& 	size = subRings[ringID].size;
+
 	int oldSize = atomicSub( (int*) &size, 1 );
 
-	if( 0 < oldSize )
+	if( 1000 < oldSize )
 	{
-		uint freeLoc = atomicInc( (uint*) &head, PPOOL_FRAMES - 1 );
-		volatile PFrame* pFrame = &( frames[freeList[freeLoc]] );
+		uint freeLoc = atomicInc( (uint*) &head, (PPOOL_FRAMES / NUM_MEMORY_RINGS) - 1 );
+		volatile PFrame* pFrame = &( frames[freeList[base + freeLoc]] );
 
-		GPU_ASSERT( freeList[freeLoc] == pFrame->rs_offset );
+		GPU_ASSERT( freeList[base + freeLoc] == pFrame->rs_offset );
 
 		PAGE_ALLOC_STOP_WARP
 
@@ -77,7 +92,7 @@ DEBUG_NOINLINE __device__ volatile PFrame* PPool::allocPage() volatile
 //		GDBGV("candLoc", candLoc);
 		while( NUM_PAGES_SWAPOUT > numSwapped )
 		{
-			volatile PFrame* cand = &( frames[freeList[candLoc]] );
+			volatile PFrame* cand = &( frames[freeList[base + candLoc]] );
 
 			// Try to remove from the hash
 			bool removed = false;
@@ -93,16 +108,16 @@ DEBUG_NOINLINE __device__ volatile PFrame* PPool::allocPage() volatile
 				if( candLoc != tail )
 				{
 					// swap tail and current location
-					uint t = freeList[tail];
-					freeList[tail] = freeList[candLoc];
-					freeList[candLoc] = t;
+					uint t = freeList[base + tail];
+					freeList[base + tail] = freeList[base + candLoc];
+					freeList[base + candLoc] = t;
 
 					threadfence();
 				}
 
-				freePage( cand );
+				freePage( cand, tail, base );
 				numSwapped++;
-				candLoc = ( candLoc + 1 ) % PPOOL_FRAMES;
+				candLoc = ( candLoc + 1 ) % (PPOOL_FRAMES / NUM_MEMORY_RINGS);
 				continue;
 			}
 
@@ -118,11 +133,11 @@ DEBUG_NOINLINE __device__ volatile PFrame* PPool::allocPage() volatile
 			// Search for another one
 
 			// In this case we will need to swap the element in tail to prevent loosing it later
-			candLoc = ( candLoc + 1 ) % PPOOL_FRAMES;
+			candLoc = ( candLoc + 1 ) % (PPOOL_FRAMES / NUM_MEMORY_RINGS);
 
 			while( (NUM_SWAP_RETRIES > numRetries) || (0 == numSwapped) )
 			{
-				cand = &( frames[freeList[candLoc]] );
+				cand = &( frames[freeList[base + candLoc]] );
 
 				bool removed = false;
 
@@ -135,15 +150,15 @@ DEBUG_NOINLINE __device__ volatile PFrame* PPool::allocPage() volatile
 				{
 //					GDBGV("candLoc", candLoc);
 					// swap tail and current location
-					uint t = freeList[tail];
-					freeList[tail] = freeList[candLoc];
-					freeList[candLoc] = t;
+					uint t = freeList[base + tail];
+					freeList[base + tail] = freeList[base + candLoc];
+					freeList[base + candLoc] = t;
 
 					threadfence();
 
-					freePage( cand );
+					freePage( cand, tail, base );
 					numSwapped++;
-					candLoc = ( candLoc + 1 ) % PPOOL_FRAMES;
+					candLoc = ( candLoc + 1 ) % (PPOOL_FRAMES / NUM_MEMORY_RINGS);
 					break;
 				}
 
@@ -155,10 +170,10 @@ DEBUG_NOINLINE __device__ volatile PFrame* PPool::allocPage() volatile
 //
 //				threadfence();
 
-				candLoc = ( candLoc + 1 ) % PPOOL_FRAMES;
+				candLoc = ( candLoc + 1 ) % (PPOOL_FRAMES / NUM_MEMORY_RINGS);
 				numRetries++;
 
-				GPU_ASSERT(numRetries < (PPOOL_FRAMES / 2))
+				GPU_ASSERT(numRetries < ((PPOOL_FRAMES / NUM_MEMORY_RINGS) / 2))
 			}
 
 			if( NUM_SWAP_RETRIES <= numRetries  )
@@ -172,10 +187,10 @@ DEBUG_NOINLINE __device__ volatile PFrame* PPool::allocPage() volatile
 //		GDBGV("numSwapped", numSwapped);
 //		GDBGV("numRetries", numRetries);
 
-		uint freeLoc = atomicInc( (uint*) &head, PPOOL_FRAMES - 1 );
-		volatile PFrame* pFrame = &( frames[freeList[freeLoc]] );
+		uint freeLoc = atomicInc( (uint*) &head, (PPOOL_FRAMES / NUM_MEMORY_RINGS) - 1 );
+		volatile PFrame* pFrame = &( frames[freeList[base + freeLoc]] );
 
-		GPU_ASSERT( freeList[freeLoc] == pFrame->rs_offset );
+		GPU_ASSERT( freeList[base + freeLoc] == pFrame->rs_offset );
 
 		PAGE_ALLOC_STOP_WARP
 
@@ -185,12 +200,12 @@ DEBUG_NOINLINE __device__ volatile PFrame* PPool::allocPage() volatile
 
 		return pFrame;
 	}
-	else if( 0 < oldSize )
+	else if( 1000 < oldSize )
 	{
 		uint freeLoc = atomicInc( (uint*) &head, PPOOL_FRAMES - 1 );
-		volatile PFrame* pFrame = &( frames[freeList[freeLoc]] );
+		volatile PFrame* pFrame = &( frames[freeList[base + freeLoc]] );
 
-		GPU_ASSERT( freeList[freeLoc] == pFrame->rs_offset );
+		GPU_ASSERT( freeList[base + freeLoc] == pFrame->rs_offset );
 
 		PAGE_ALLOC_STOP_WARP
 
@@ -206,29 +221,29 @@ DEBUG_NOINLINE __device__ volatile PFrame* PPool::allocPage() volatile
 	}
 }
 
-DEBUG_NOINLINE __device__ void PPool::freePage(volatile PFrame* frame) volatile
+DEBUG_NOINLINE __device__ void PPool::freePage(volatile PFrame* frame, volatile uint& tail, uint base) volatile
 {
-	GPU_ASSERT( freeList[tail] == frame->rs_offset );
+	GPU_ASSERT( freeList[base + tail] == frame->rs_offset );
 
 	frame->clean();
-	freeList[tail] = frame->rs_offset;
-	tail = ( tail + 1 ) % PPOOL_FRAMES;
+	freeList[base + tail] = frame->rs_offset;
+	tail = ( tail + 1 ) % (PPOOL_FRAMES / NUM_MEMORY_RINGS);
 	threadfence();
 }
 
-DEBUG_NOINLINE __device__ bool PPool::tryLockSwapper() volatile
-{
-	return MUTEX_TRY_LOCK(swapLock);
-}
-
-DEBUG_NOINLINE __device__ void PPool::lockSwapper() volatile
-{
-	MUTEX_LOCK(swapLock);
-}
-
-DEBUG_NOINLINE __device__ void PPool::unlockSwapper() volatile
-{
-	MUTEX_UNLOCK(swapLock);
-}
+//DEBUG_NOINLINE __device__ bool PPool::tryLockSwapper() volatile
+//{
+//	return MUTEX_TRY_LOCK(swapLock);
+//}
+//
+//DEBUG_NOINLINE __device__ void PPool::lockSwapper() volatile
+//{
+//	MUTEX_LOCK(swapLock);
+//}
+//
+//DEBUG_NOINLINE __device__ void PPool::unlockSwapper() volatile
+//{
+//	MUTEX_UNLOCK(swapLock);
+//}
 
 #endif
