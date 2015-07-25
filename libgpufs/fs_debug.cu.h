@@ -39,7 +39,7 @@ __device__ void _dbg(const char *s,
                        const char *fname,
                        const char *func);
 
-#define DBGT(s, ptr, v, t) _dbg(s, ptr, v, t, __LINE__, __FILE__, __func__)
+#define DBGT(s, ptr, v, t) _dbg(s, (void*)ptr, (size_t)v, t, __LINE__, __FILE__, __func__)
 #define DBG_INIT() _gdebug_init()
 
 #else
