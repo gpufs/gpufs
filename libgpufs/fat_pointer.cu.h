@@ -158,7 +158,7 @@ class FatPointer
 {
 public:
 	__device__ FatPointer( size_t fid, off_t start, size_t size, int flags, TLB<N>* tlb, uchar* mem, volatile PFrame* frames ) :
-	m_fid(fid), m_start(start), m_end(start + size), m_flags(flags)
+	m_fid(fid), m_start(start), m_end(start + size)
 	{
 		m_ptr.virtPage = start >> FS_LOGBLOCKSIZE;
 		m_ptr.valid = 0;
@@ -173,7 +173,7 @@ public:
 
 	__device__ FatPointer( const FatPointer& ptr ) :
 	m_fid(ptr.m_fid), m_start(ptr.m_start), m_end(ptr.m_end), m_ptr(ptr.m_ptr),
-	m_tlb(ptr.m_tlb), m_mem(ptr.m_mem), m_frames(ptr.m_frames), m_flags(ptr.m_flags)
+	m_tlb(ptr.m_tlb), m_mem(ptr.m_mem), m_frames(ptr.m_frames)
 	{
 		// Copies are invalid by definition
 		m_ptr.valid = 0;
@@ -183,12 +183,47 @@ public:
 
 	__device__ ~FatPointer()
 	{
-		if( m_ptr.valid )
+		bool resolved = false;
+
+		if( !m_ptr.valid )
 		{
-			// Decrease ref count since we no longer hold the page
-			size_t virtPage = m_frames[m_ptr.physPage].file_offset >> FS_LOGBLOCKSIZE;
-			size_t h = hash( virtPage );
-			int old = atomicSub( (int*)&(m_tlb->locks[h]), 1 );
+			resolved = true;
+		}
+
+		while( !resolved )
+		{
+			// Gather every thread that needs the same page
+			int invalidThreads = __ballot( 1 );
+
+			int leader = __ffs( invalidThreads );
+
+			// Correction because __ffs start counting from 1;
+			leader -= 1;
+
+			BroadcastHelper bHelper;
+			bHelper.l = m_ptr.physPage;
+			bHelper = broadcast( bHelper, leader );
+
+			int want = (m_ptr.physPage == bHelper.l);
+			int wantThreads = __ballot( want );
+			int numWants = __popc( wantThreads );
+
+			long long virtPage;
+
+			if( LANE_ID == leader )
+			{
+				// We're valid so we only have the physical page, get the virtual from the buffer cache
+				virtPage = m_frames[m_ptr.physPage].file_offset >> FS_LOGBLOCKSIZE;
+
+				// Decrease ref count since we no longer hold the page
+				size_t h = hash( virtPage );
+				int old = atomicSub( (int*)&(m_tlb->locks[h]), numWants );
+			}
+
+			if( want )
+			{
+				resolved = true;
+			}
 		}
 	}
 
@@ -197,7 +232,6 @@ public:
 		m_fid = ptr.m_fid;
 		m_start = ptr.m_start;
 		m_end = ptr.m_end;
-		m_flags = ptr.m_flags;
 
 		m_ptr = ptr.m_ptr;
 
@@ -554,7 +588,6 @@ public:
 	size_t m_fid;	// Should be spilled to local memory
 	off_t m_start;	// Should be spilled to local memory
 	size_t m_end;	// Should be spilled to local memory
-	int m_flags;	// Should be spilled to local memory
 
 	_FatPtr m_ptr;
 

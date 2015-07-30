@@ -66,7 +66,7 @@ DEBUG_NOINLINE __device__ volatile PFrame* PPool::allocPage() volatile
 
 	int oldSize = atomicSub( (int*) &size, 1 );
 
-	if( 1000 < oldSize )
+	if( LOWER_WATER_MARK < oldSize )
 	{
 		uint freeLoc = atomicInc( (uint*) &head, (PPOOL_FRAMES / NUM_MEMORY_RINGS) - 1 );
 		volatile PFrame* pFrame = &( frames[freeList[base + freeLoc]] );
@@ -200,7 +200,7 @@ DEBUG_NOINLINE __device__ volatile PFrame* PPool::allocPage() volatile
 
 		return pFrame;
 	}
-	else if( 1000 < oldSize )
+	else if( LOWER_WATER_MARK < oldSize )
 	{
 		uint freeLoc = atomicInc( (uint*) &head, PPOOL_FRAMES - 1 );
 		volatile PFrame* pFrame = &( frames[freeList[base + freeLoc]] );

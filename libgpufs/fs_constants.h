@@ -22,7 +22,8 @@
 // home many pages to swapout at once
 #define NUM_PAGES_SWAPOUT (64)
 #define NUM_SWAP_RETRIES (64)
-#define NUM_MEMORY_RINGS (112)
+#define NUM_MEMORY_RINGS (1)
+#define LOWER_WATER_MARK (0)
 
 #define FS_LOGBLOCKSIZE (12)
 #define FS_BLOCKSIZE ( 1 << FS_LOGBLOCKSIZE )
@@ -66,7 +67,7 @@
 #define RW_IPC_DIFF 2
 #define RW_IPC_TRUNC 3
 
-#define RW_HOST_WORKERS 1
+#define RW_HOST_WORKERS 4
 #define RW_SLOTS_PER_WORKER (RW_IPC_SIZE / RW_HOST_WORKERS)
 #define RW_SCRATCH_PER_WORKER 2
 
