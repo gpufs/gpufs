@@ -393,13 +393,15 @@ public:
 	{
 		offset *= sizeof(T);
 
+		offset += m_ptr.pageOffset;
+		m_ptr.pageOffset = offset;
+
 		if( m_ptr.valid )
 		{
 			// Try to keep it valid
-			if( 0 == ((m_ptr.pageOffset + offset) >> FS_LOGBLOCKSIZE) )
+			if( 0 == (offset >> FS_LOGBLOCKSIZE) )
 			{
 				// We're still in the same block, just update the physical offset
-				m_ptr.pageOffset += offset;
 				return *this;
 			}
 
@@ -451,11 +453,12 @@ public:
 			// Fall through
 		}
 
-		m_ptr.virtPage = m_ptr.virtPage + ((m_ptr.pageOffset + offset) >> FS_LOGBLOCKSIZE);
-		m_ptr.pageOffset = (m_ptr.pageOffset + offset) & FS_BLOCKMASK;
+		m_ptr.virtPage = m_ptr.virtPage + (offset >> FS_LOGBLOCKSIZE);
+		m_ptr.pageOffset = offset & FS_BLOCKMASK;
 
 		return *this;
 	}
+
 
 	__forceinline__ __device__ T& operator *()
 	{
@@ -835,13 +838,15 @@ public:
 	{
 		offset *= sizeof(T);
 
+		offset += m_ptr.pageOffset;
+		m_ptr.pageOffset = offset;
+
 		if( m_ptr.valid )
 		{
 			// Try to keep it valid
-			if( 0 == ((m_ptr.pageOffset + offset) >> FS_LOGBLOCKSIZE) )
+			if( 0 == (offset >> FS_LOGBLOCKSIZE) )
 			{
 				// We're still in the same block, just update the physical offset
-				m_ptr.pageOffset += offset;
 				return *this;
 			}
 
@@ -888,8 +893,8 @@ public:
 			// Fall through
 		}
 
-		m_ptr.virtPage = m_ptr.virtPage + ((m_ptr.pageOffset + offset) >> FS_LOGBLOCKSIZE);
-		m_ptr.pageOffset = (m_ptr.pageOffset + offset) & FS_BLOCKMASK;
+		m_ptr.virtPage = m_ptr.virtPage + (offset >> FS_LOGBLOCKSIZE);
+		m_ptr.pageOffset = offset & FS_BLOCKMASK;
 
 		return *this;
 	}
