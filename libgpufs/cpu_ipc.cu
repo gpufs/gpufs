@@ -176,9 +176,6 @@ __device__ int CPU_IPC_RW_Entry::read_write( int fd, int _cpu_fd, volatile PFram
 	status = CPU_IPC_PENDING;
 	__threadfence_system();
 
-	volatile FTable_entry* file = &g_ftable->files[fd];
-	file->busyList.push( frame );
-
 	WAIT_ON_MEM( status, CPU_IPC_READY );
 	CPU_READ_STOP
 	return readNoCache( &return_size );

@@ -22,12 +22,12 @@ CUDA_ROOT:=/usr/local/cuda/
 CUDA_INCLUDE=-I$(CUDA_ROOT)/include -I$(GPUFSLIB) -I$(LIBGPUFSDIR) -I$(DONARDLIB)
 
 ifneq ($(dbg),1)
-	MACROS=-DDEBUG_NOINLINE=""
-	NVCC=$(CUDA_ROOT)/bin/nvcc -std=c++11 --generate-code code=sm_35,arch=compute_35 $(CUDA_INCLUDE) $(MACROS) -O3 -maxrregcount 32
+	MACROS=-DDEBUG_NOINLINE="" -DTIMING_STATS 
+	NVCC=$(CUDA_ROOT)/bin/nvcc -std=c++11 --generate-code code=sm_35,arch=compute_35 --generate-code code=sm_37,arch=compute_37 $(CUDA_INCLUDE) $(MACROS) -O3 -maxrregcount 64
 	OUTPUTDIR=release
 else
-	MACROS=-DDEBUG_NOINLINE="__noinline__" -DMALLOC_STATS -DTIMING_STATS -DDEBUG
-	NVCC=$(CUDA_ROOT)/bin/nvcc -std=c++11 --generate-code code=sm_35,arch=compute_35 $(CUDA_INCLUDE) $(MACROS) -O0 --device-debug --debug -g
+	MACROS=-DDEBUG_NOINLINE="__noinline__" -DMALLOC_STATS -DTIMING_STATS -g
+	NVCC=$(CUDA_ROOT)/bin/nvcc -std=c++11 --generate-code code=sm_35,arch=compute_35 --generate-code code=sm_37,arch=compute_37 $(CUDA_INCLUDE) $(MACROS) -O0 -maxrregcount 64 --device-debug --debug -G
 	OUTPUTDIR=debug
 endif
 

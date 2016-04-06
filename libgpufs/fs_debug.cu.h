@@ -216,6 +216,8 @@ extern __device__ unsigned long long FileOpenTime;
 extern __device__ unsigned long long CPUReadTime;
 extern __device__ unsigned long long BusyListInsertTime;
 extern __device__ unsigned long long FileCloseTime;
+extern __device__ unsigned long long EvictTime;
+extern __device__ unsigned long long EvictLockTime;
 
 #define PRINT_TIME(SYMBOL, blocks) { unsigned long long tmp; \
 			     cudaMemcpyFromSymbol(&tmp,SYMBOL,sizeof(unsigned long long),0,cudaMemcpyDeviceToHost); \
@@ -264,7 +266,9 @@ extern __device__ unsigned long long FileCloseTime;
 	INIT_STATS(PageAllocTime); \
 	INIT_STATS(FileOpenTime); \
 	INIT_STATS(CPUReadTime); \
-	INIT_STATS(FileCloseTime);
+	INIT_STATS(FileCloseTime); \
+	INIT_STATS(EvictTime); \
+	INIT_STATS(EvictLockTime);
 
 //////////////////////////////
 // THreadblock level timers //
@@ -338,6 +342,12 @@ extern __device__ unsigned long long FileCloseTime;
 #define BUSY_LIST_INSERT_START_WARP START_WARP( BusyListInsert )
 #define BUSY_LIST_INSERT_STOP_WARP STOP_WARP( BusyListInsert )
 
+#define EVICT_START_WARP START_WARP( Evict )
+#define EVICT_STOP_WARP STOP_WARP( Evict )
+
+#define EVICT_LOCK_START_WARP START_WARP( EvictLock )
+#define EVICT_LOCK_STOP_WARP STOP_WARP( EvictLock )
+
 //////////////////
 // Timers print //
 //////////////////
@@ -352,6 +362,8 @@ extern __device__ unsigned long long FileCloseTime;
 #define PRINT_FILE_CLOSE_TIME(blocks) PRINT_TIME(FileCloseTime, blocks);
 #define PRINT_CPU_READ_TIME(blocks) PRINT_TIME(CPUReadTime, blocks);
 #define PRINT_BUSY_LIST_INSERT_TIME(blocks) PRINT_TIME(BusyListInsertTime, blocks);
+#define PRINT_EVICT_TIME(blocks) PRINT_TIME(EvictTime, blocks);
+#define PRINT_EVICT_LOCK_TIME(blocks) PRINT_TIME(EvictLockTime, blocks);
 
 #else
 
@@ -434,6 +446,12 @@ extern __device__ unsigned long long FileCloseTime;
 #define BUSY_LIST_INSERT_START_WARP
 #define BUSY_LIST_INSERT_STOP_WARP
 
+#define EVICT_START_WARP
+#define EVICT_STOP_WARP
+
+#define EVICT_LOCK_START_WARP
+#define EVICT_LOCK_STOP_WARP
+
 //////////////////
 // Timers print //
 //////////////////
@@ -448,6 +466,8 @@ extern __device__ unsigned long long FileCloseTime;
 #define PRINT_FILE_CLOSE_TIME(blocks)
 #define PRINT_CPU_READ_TIME(blocks)
 #define PRINT_BUSY_LIST_INSERT_TIME(blocks)
+#define PRINT_EVICT_TIME(blocks)
+#define PRINT_EVICT_LOCK_TIME(blocks)
 
 #endif
 

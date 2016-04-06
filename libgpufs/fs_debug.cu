@@ -57,6 +57,8 @@ __device__ unsigned long long FileOpenTime;
 __device__ unsigned long long FileCloseTime;
 __device__ unsigned long long CPUReadTime;
 __device__ unsigned long long BusyListInsertTime;
+__device__ unsigned long long EvictTime;
+__device__ unsigned long long EvictLockTime;
 #endif
 
 #ifdef DEBUG

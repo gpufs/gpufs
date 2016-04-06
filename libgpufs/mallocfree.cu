@@ -78,6 +78,7 @@ DEBUG_NOINLINE __device__ volatile PFrame* PPool::allocPage() volatile
 		return pFrame;
 	}
 
+	EVICT_START_WARP
 	// else, we are almost out of memory
 	if( MUTEX_TRY_LOCK(swapLock) )
 	{
@@ -198,6 +199,7 @@ DEBUG_NOINLINE __device__ volatile PFrame* PPool::allocPage() volatile
 
 		MUTEX_UNLOCK( swapLock );
 
+		EVICT_STOP_WARP
 		return pFrame;
 	}
 	else if( LOWER_WATER_MARK < oldSize )
@@ -208,6 +210,7 @@ DEBUG_NOINLINE __device__ volatile PFrame* PPool::allocPage() volatile
 		GPU_ASSERT( freeList[base + freeLoc] == pFrame->rs_offset );
 
 		PAGE_ALLOC_STOP_WARP
+		EVICT_STOP_WARP
 
 		return pFrame;
 	}
@@ -217,6 +220,7 @@ DEBUG_NOINLINE __device__ volatile PFrame* PPool::allocPage() volatile
 		// Abort
 		int old = atomicAdd( (int*) &size, 1 );
 //		GDBGV("Revert malloc", old);
+		EVICT_STOP_WARP
 		return NULL;
 	}
 }

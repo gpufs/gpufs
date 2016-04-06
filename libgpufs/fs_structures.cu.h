@@ -62,21 +62,20 @@ public:
 struct BusyList
 {
 private:
-	int 				_lock;
+	int 				_lock[NUM_BUSY_LISTS];
 
 public:
 
-	volatile size_t 	count;
-	volatile PFrame* 	head;
+	volatile PFrame* 	heads[NUM_BUSY_LISTS];
 
 	__device__ void init_thread() volatile;
 	__device__ void clean() volatile;
 
 	__device__ void push( volatile PFrame* frame ) volatile;
 
-	__device__ void lock() volatile;
-	__device__ bool try_lock() volatile;
-	__device__ void unlock() volatile;
+	__device__ void lock(int id) volatile;
+	__device__ bool try_lock(int id) volatile;
+	__device__ void unlock(int id) volatile;
 };
 
 struct FTable_entry
@@ -105,7 +104,7 @@ struct FTable_entry
 
 	__device__ void wait_open() volatile;
 
-	__device__ void traverse_all_for_close() volatile;
+	__device__ void flush(bool closeFile) volatile;
 
 	__device__ void clean() volatile;
 
