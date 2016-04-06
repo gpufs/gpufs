@@ -78,7 +78,7 @@ END_SINGLE_THREAD
 // we have this called by all the threads in a TB, otherwise the copy inside the traverse_all
 // function will be very slow
 
-	file->traverse_all_for_close();
+	file->flush(true/*closeFile*/);
 
 // we do close now: we must hold a global lock on the file table
 // because otherwise the thread which is opening a file will get

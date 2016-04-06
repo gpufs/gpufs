@@ -175,43 +175,45 @@ DEBUG_NOINLINE __device__ void PFrame::markDirty() volatile
 
 DEBUG_NOINLINE __device__ void BusyList::init_thread() volatile
 {
-	_lock = 0;
-	count = 0;
-	head = NULL;
+	for (int i = 0; i < NUM_BUSY_LISTS; ++i){
+		_lock[i] = 0;
+		heads[i] = NULL;
+	}
 }
 
 DEBUG_NOINLINE __device__ void BusyList::clean() volatile
 {
-	count = 0;
-	head = NULL;
+	for (int i = 0; i < NUM_BUSY_LISTS; ++i){
+		heads[i] = NULL;
+	}
 }
 
 DEBUG_NOINLINE __device__ void BusyList::push( volatile PFrame* frame ) volatile
 {
-	lock();
+	int id = BLOCK_ID % NUM_BUSY_LISTS;
 
-	volatile PFrame* temp = head;
-	head = frame;
+	lock(id);
+
+	volatile PFrame* temp = heads[id];
+	heads[id] = frame;
 	frame->nextDirty = temp;
 
-	count++;
-
-	unlock();
+	unlock(id);
 }
 
-DEBUG_NOINLINE __device__ void BusyList::lock() volatile
+DEBUG_NOINLINE __device__ void BusyList::lock(int id) volatile
 {
-	MUTEX_LOCK( _lock );
+	MUTEX_LOCK( _lock[id] );
 }
 
-DEBUG_NOINLINE __device__ bool BusyList::try_lock() volatile
+DEBUG_NOINLINE __device__ bool BusyList::try_lock(int id) volatile
 {
-	return MUTEX_TRY_LOCK(_lock);
+	return MUTEX_TRY_LOCK( _lock[id] );
 }
 
-DEBUG_NOINLINE __device__ void BusyList::unlock() volatile
+DEBUG_NOINLINE __device__ void BusyList::unlock(int id) volatile
 {
-	MUTEX_UNLOCK( _lock );
+	MUTEX_UNLOCK( _lock[id] );
 }
 
 //******* OPEN/CLOSE *//
@@ -258,38 +260,41 @@ DEBUG_NOINLINE __device__ void FTable_entry::wait_open() volatile
 	WAIT_ON_MEM( status, FSENTRY_OPEN );
 }
 
-DEBUG_NOINLINE __device__ void FTable_entry::traverse_all_for_close() volatile
+DEBUG_NOINLINE __device__ void FTable_entry::flush(bool closeFile) volatile
 {
 	if ( !dirty ) return;
 
-	BEGIN_SINGLE_THREAD
-		busyList.lock();
-	END_SINGLE_THREAD
+	for (int id = 0; id < NUM_BUSY_LISTS; ++id) {
+		BEGIN_SINGLE_THREAD
+			busyList.lock(id);
+		END_SINGLE_THREAD
 
-	while( busyList.head != NULL )
-	{
-		syncthreads();
+		volatile PFrame* frame = busyList.heads[id];
 
-		volatile PFrame* frame = busyList.head;
-		if( frame->dirty || frame->dirtyCounter>0 )
-		{
+		while( frame != NULL ) {
 			syncthreads();
 
-			writeback_page_async_on_close(cpu_fd, frame, flags);
-			frame->dirty = 0;
-			frame->dirtyCounter = 0;
+			if( frame->dirty || frame->dirtyCounter>0 )	{
+				syncthreads();
+
+				writeback_page_async_on_close(cpu_fd, frame, flags);
+				frame->dirty = 0;
+				frame->dirtyCounter = 0;
+			}
+
+			frame = frame->nextDirty;
 		}
 
-		busyList.head = frame->nextDirty;
-		frame->nextDirty = NULL;
+		BEGIN_SINGLE_THREAD
+			busyList.unlock(id);
+		END_SINGLE_THREAD
 	}
 
 	dirty = false;
-	writeback_page_async_on_close_done(cpu_fd);
 
-	BEGIN_SINGLE_THREAD
-	busyList.unlock();
-	END_SINGLE_THREAD
+	if (closeFile) {
+		writeback_page_async_on_close_done(cpu_fd);
+	}
 }
 
 DEBUG_NOINLINE __device__ void FTable_entry::clean() volatile

@@ -162,37 +162,6 @@ struct _emptyTLB
 template<int N>
 struct TLB : public std::conditional<N == 0, _emptyTLB<N>, _nonEmptyTLB<N>>::type
 {
-//	_TlbLine lines[N];
-//	int locks[N];
-//
-//	__device__ TLB()
-//	{
-//		if( LANE_ID == 0 )
-//		{
-//			for( int i = WARP_ID; i < N; i += NUM_WARPS )
-//			{
-//				DBGT( "i", WARP_ID, i, threadIdx.x );
-//				lines[i].physPage = 0;
-//				lines[i].virtPage = INVALID_VPAGE;
-//				lines[i].fid = INVALID_FID;
-//				locks[i] = 0;
-//			}
-//		}
-//	}
-//
-//	__device__ ~TLB()
-//	{
-//		if( LANE_ID == 0 )
-//		{
-//			for( int i = WARP_ID; i < N; i += NUM_WARPS )
-//			{
-//				if( lines[i].fid != INVALID_FID )
-//				{
-//					g_ppool->frames[lines[i].physPage].unlock_rw();
-//				}
-//			}
-//		}
-//	}
 };
 
 template<typename T, int N> class _FatPointerWithTLB;
