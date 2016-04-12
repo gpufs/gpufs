@@ -240,9 +240,7 @@ int main(int argc, char** argv)
 		perror("stat failed");
 	if (stat(argv[5], &s2))
 		perror("stat failed");
-	if (stat(argv[6], &s3))
-		perror("stat failed");
-	total_size = s1.st_size + s2.st_size + s3.st_size;
+	total_size = s1.st_size;
 	double d_size = total_size / 1024.0 / 1024.0 / 1024.0;
 
 	double avg_time, avg_thpt, std_time, std_thpt;

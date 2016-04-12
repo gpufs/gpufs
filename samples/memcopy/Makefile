@@ -17,7 +17,7 @@ CUDA_INCLUDE=-I$(GPUFSROOTDIR)/include -I$(CUDA_ROOT)/include
 CUDA_LIB=-L$(GPUFSROOTDIR)/lib -L$(CUDA_ROOT)/lib64 -lgpufs -lcudart
 
 CXXFLAGS=-O2 $(CUDA_INCLUDE) $(CUDA_LIB)
-NVCCFLAGS=-O2 $(CUDA_INCLUDE) $(CUDA_LIB) --generate-code code=sm_35,arch=compute_35 -maxrregcount 32
+NVCCFLAGS=-O2 $(CUDA_INCLUDE) $(CUDA_LIB) --std=c++11 --generate-code code=sm_35,arch=compute_35 -maxrregcount 32
 
 NVCC=$(CUDA_ROOT)/bin/nvcc
 

@@ -817,6 +817,16 @@ DEBUG_NOINLINE __device__ int gmsync(volatile void *addr, size_t length, int fla
 	return 0;
 }   
 
+DEBUG_NOINLINE __device__ uint gunlink(char* filename)
+{
+	GPU_ASSERT(NULL);
+	// tobe implemented
+	return 0;
+}
+DEBUG_NOINLINE __device__ size_t fstat(int fd)
+{
+	return g_ftable->files[fd].size;
+}
 
 
 
