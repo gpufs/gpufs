@@ -1,24 +1,43 @@
-CXXFLAGS=-fopenmp -g
+CUDA_DIR=/usr/local/cuda
+LIBCUDA=-L$(CUDA_DIR)/lib64 -lcudart -lcudadevrt
+CUDAINC=-I$(CUDA_DIR)/include
+CC=/usr/bin/g++
 
-LIBGPUFSDIR=../../libgpufs/
+GPUFSDIR?=../../
+REG?=32
 
-PAYLOAD=matrixMul_kernel.cu
-include $(LIBGPUFSDIR)/Makefile
+CXXFLAGS = -std=c++11
+GPUFSINC = $(GPUFSDIR)/include
 
+OBJS = matrixMul_kernel.o matrixMul.o
 
-CUDA_LIBS+=-L$(CUDA_ROOT)/lib64 -lcudart -L$(CUDA_SDK_ROOT)/C/lib/ -lcutil_x86_64  -L$(CUDA_SDK_ROOT)/shared/lib -lshrutil_x86_64
+MAIN = mm
 
-CUDA_INCLUDE+=-I$(CUDA_ROOT)/include -I$(CUDA_SDK_ROOT)/C/common/inc   -I$(CUDA_SDK_ROOT)/shared/inc  -I$(LIBGPUFSDIR) -I../../gpufs_con_lib.user
+ifneq ($(dbg),1)
+	MACROS=-DDEBUG_NOINLINE="" -DBLOCK_SIZE="32"
+	CUFLAGS = --std=c++11 -O3 -rdc=true -maxrregcount=$(REG) -gencode arch=compute_35,code=sm_35 -gencode arch=compute_37,code=sm_37
+	LINKFLAGS = -O3 -rdc=true -gencode arch=compute_35,code=sm_35 -gencode arch=compute_37,code=sm_37
+	NVCC=$(CUDA_DIR)/bin/nvcc $(CUDAINC) $(MACROS)
+	GPUFSLIBS = -lgpufs -L$(GPUFSDIR)/lib
+else
+	MACROS=-DDEBUG_NOINLINE="__noinline__" -DBLOCK_SIZE="32" -DMALLOC_STATS -DTIMING_STATS -DDEBUG
+	CUFLAGS = --std=c++11 -O0 -rdc=true -gencode arch=compute_35,code=sm_35 -gencode arch=compute_37,code=sm_37
+	LINKFLAGS = -O0 -rdc=true -gencode arch=compute_35,code=sm_35 -gencode arch=compute_37,code=sm_37
+	NVCC=$(CUDA_DIR)/bin/nvcc $(CUDA_INCLUDE) $(MACROS)
+	GPUFSLIBS = -lgpufsd -L$(GPUFSDIR)/lib
+endif
 
+all: $(MAIN)
 
-mm: matrixMul.o 
-	$(NVCC) -link -o mm matrixMul.o  -L$(LIBGPUFSDIR) -lgpufs  $(CUDA_LIBS)  -g
+$(MAIN): $(OBJS)
+	$(NVCC) $(LINKFLAGS) $(GPUFSLIBS) -o $(MAIN) $(OBJS) $(LDLIBS) $(LIBCUDA)
 
-mm.debug: matrixMul.o matrixMul_debug
-	$(NVCC) -link -o mm matrixMul.o  -L$(LIBGPUFSDIR) -lgpufsd  $(CUDA_LIBS) -g --device-debug
+matrixMul.o: matrixMul.cu $(GPUFSINC)/host_loop.h
+	$(NVCC) $(FLAGS) $(CUFLAGS) -I$(GPUFSINC) -c $<
 
-matrixMul.o: matrixMul.cu matrixMul_kernel.cu
-	$(NVCC) -dc matrixMul.cu -I/usr/local/cuda-5.0/samples/common/inc/ -g
+matrixMul_kernel.o: matrixMul_kernel.cu
+	$(NVCC) $(FLAGS) $(CUFLAGS) -I$(GPUFSINC) -c $<
 
-matrixMul_debug: matrixMul.cu matrixMul_kernel.cu
-	/usr/local/cuda-5.0//bin/nvcc  --gpu-architecture=sm_21 -I/usr/local/cuda-5.0//include -I$(CUDA_SDK_ROOT)/C/common/inc -I../../gpufs_con_lib.user  -Xptxas -v  -DDEBUG_NOINLINE="__noinline__"   -DMALLOC_STATS --debug -O0 -g   --device-debug -dc matrixMul.cu -I$(CUDA_ROOT)/include -I$(CUDA_SDK_ROOT)/C/common/inc   -I$(CUDA_SDK_ROOT)/shared/inc -lcublas -I$(LIBGPUFSDIR)
+clean:
+	\rm -f $(MAIN) *.o *~
+
