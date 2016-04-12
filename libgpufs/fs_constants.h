@@ -19,15 +19,18 @@
 #ifndef FS_CONSTANTS
 #define FS_CONSTANTS
 
+// needed for mmap return codes
+#include <sys/mman.h>
+
 // home many pages to swapout at once
 #define NUM_PAGES_SWAPOUT (64)
 #define NUM_SWAP_RETRIES (64)
-#define NUM_MEMORY_RINGS (64)
-#define LOWER_WATER_MARK (100)
+#define NUM_MEMORY_RINGS (1)
+#define LOWER_WATER_MARK (0)
 
 #define NUM_BUSY_LISTS (256)
 
-#define FS_LOGBLOCKSIZE (12)
+#define FS_LOGBLOCKSIZE (20)
 #define FS_BLOCKSIZE ( 1 << FS_LOGBLOCKSIZE )
 #define FS_BLOCKMASK (FS_BLOCKSIZE - 1);
 

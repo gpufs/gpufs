@@ -225,8 +225,7 @@ DEBUG_NOINLINE __device__ volatile PFrame* PPool::allocPage() volatile
 	}
 }
 
-DEBUG_NOINLINE __device__ void PPool::freePage(volatile PFrame* frame, volatile uint& tail, uint base) volatile
-{
+DEBUG_NOINLINE __device__ void PPool::freePage(volatile PFrame* frame, volatile unsigned int& tail, uint base) volatile {
 	GPU_ASSERT( freeList[base + tail] == frame->rs_offset );
 
 	frame->clean();

@@ -1,37 +1,37 @@
-#/* 
-#* This expermental software is provided AS IS. 
-#* Feel free to use/modify/distribute, 
-#* If used, please retain this disclaimer and cite 
-#* "GPUfs: Integrating a file system with GPUs", 
+#/*
+#* This expermental software is provided AS IS.
+#* Feel free to use/modify/distribute,
+#* If used, please retain this disclaimer and cite
+#* "GPUfs: Integrating a file system with GPUs",
 #* M Silberstein,B Ford,I Keidar,E Witchel
 #* ASPLOS13, March 2013, Houston,USA
 #*/
 
 
-# This Makefile is used to build the library: 
+# This Makefile is used to build the library:
 # Run: make libgpufs.a
-# For debug version: make dbg=1 libgpufsd.a 
+# For debug version: make dbg=1 libgpufsd.a
 # This file is also included in the makefiles to build user applications
 # See "workloads" directory
 LIBGPUFSDIR?=.
 INSTALLDIR?=..
+REG?=32
 
-GPUFSLIB=$(LIBGPUFSDIR)/../gpufs_con_lib.user/
-DONARDLIB=/home/sagi/ASPLOS16/donard/
+GPUFSLIB=../gpufs_con_lib.user/
 CUDA_ROOT:=/usr/local/cuda/
-CUDA_INCLUDE=-I$(CUDA_ROOT)/include -I$(GPUFSLIB) -I$(LIBGPUFSDIR) -I$(DONARDLIB)
+CUDA_INCLUDE=-I$(CUDA_ROOT)/include -I$(GPUFSLIB) -I$(LIBGPUFSDIR)
 
 ifneq ($(dbg),1)
-	MACROS=-DDEBUG_NOINLINE="" -DTIMING_STATS 
-	NVCC=$(CUDA_ROOT)/bin/nvcc -std=c++11 --generate-code code=sm_35,arch=compute_35 --generate-code code=sm_37,arch=compute_37 $(CUDA_INCLUDE) $(MACROS) -O3 -maxrregcount 64
+	MACROS=-DDEBUG_NOINLINE=""
+	NVCC=$(CUDA_ROOT)/bin/nvcc -std=c++11 --generate-code code=sm_35,arch=compute_35 --generate-code code=sm_37,arch=compute_37 $(CUDA_INCLUDE) $(MACROS) -O3 -maxrregcount $(REG)
 	OUTPUTDIR=release
 else
 	MACROS=-DDEBUG_NOINLINE="__noinline__" -DMALLOC_STATS -DTIMING_STATS -g
-	NVCC=$(CUDA_ROOT)/bin/nvcc -std=c++11 --generate-code code=sm_35,arch=compute_35 --generate-code code=sm_37,arch=compute_37 $(CUDA_INCLUDE) $(MACROS) -O0 -maxrregcount 64 --device-debug --debug -G
+	NVCC=$(CUDA_ROOT)/bin/nvcc -std=c++11 --generate-code code=sm_35,arch=compute_35 --generate-code code=sm_37,arch=compute_37 $(CUDA_INCLUDE) $(MACROS) -O0 -maxrregcount $(REG) --device-debug --debug -G
 	OUTPUTDIR=debug
 endif
 
-CC=g++ $(CUDA_INCLUDE) -Wall -Wno-write-strings $(MACROS) 
+CC=g++ $(CUDA_INCLUDE) -Wall -Wno-write-strings $(MACROS)
 
 GPUFS_SOURCES=\
 $(OUTPUTDIR)/cpu_ipc.o\
@@ -48,12 +48,10 @@ $(OUTPUTDIR)/gpufs_con_lib.o\
 
 ifneq ($(dbg),1)
 $(OUTPUTDIR)/libgpufs.a : $(GPUFS_SOURCES) | $(OUTPUTDIR)
-	ar -x $(DONARDLIB)/libdonard.a
-	ar ru $(OUTPUTDIR)/libgpufs.a $(GPUFS_SOURCES) *.o
+	ar ru $(OUTPUTDIR)/libgpufs.a $(GPUFS_SOURCES)
 else
 $(OUTPUTDIR)/libgpufsd.a: $(GPUFS_SOURCES) | $(OUTPUTDIR)
-	ar -x $(DONARDLIB)/libdonard.a
-	ar ru $(OUTPUTDIR)/libgpufsd.a $(GPUFS_SOURCES) *.o
+	ar ru $(OUTPUTDIR)/libgpufsd.a $(GPUFS_SOURCES)
 endif
 
 $(OUTPUTDIR)/timer.o: timer.cpp timer.h | $(OUTPUTDIR)
@@ -87,7 +85,7 @@ $(OUTPUTDIR)/async_ipc.o: util.cu.h fs_debug.cu.h generic_ringbuf.cu.h async_ipc
 
 $(OUTPUTDIR)/generic_ringbuf.o: util.cu.h generic_ringbuf.cu.h generic_ringbuf.cu fs_constants.h | $(OUTPUTDIR)
 	$(NVCC) -dc generic_ringbuf.cu -o $(OUTPUTDIR)/generic_ringbuf.o
-	
+
 $(OUTPUTDIR)/hashMap.o: hashMap.cu hashMap.cu.h fs_structures.cu.h fs_constants.h util.cu.h | $(OUTPUTDIR)
 	$(NVCC) -dc hashMap.cu -o $(OUTPUTDIR)/hashMap.o
 

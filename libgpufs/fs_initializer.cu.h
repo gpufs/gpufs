@@ -49,7 +49,6 @@
 #define initGpuGlobals(T,d_ptr,symbol)\
 {\
 	CUDA_SAFE_CALL(cudaMalloc((void**)&(d_ptr),sizeof(T)));\
-	fprintf(stderr, #symbol ": %.2fMB\n", (float)(sizeof(T)) / (1024.f * 1024.f));\
 	CUDA_SAFE_CALL(cudaMemset((void*)d_ptr,0,sizeof(T)));\
 	CUDA_SAFE_CALL(cudaMemcpyToSymbol((symbol),&(d_ptr),sizeof(void*)));\
 }
@@ -155,20 +154,16 @@ struct GPUGlobals{
 	//	initGpuGlobals(preclose_table,_preclose_table,g_preclose_table);
 	
 		CUDA_SAFE_CALL(cudaMalloc(&rawStorage,sizeof(Page)*PPOOL_FRAMES));
-		fprintf(stderr, "rawStorage: %.2fMB\n", (float)(sizeof(Page)*PPOOL_FRAMES) / (1024.f * 1024.f));
 		CUDA_SAFE_CALL(cudaMemset(rawStorage,0,sizeof(Page)*PPOOL_FRAMES));
 
 		async_close_rb=new async_close_rb_t();
 		async_close_rb->init_host();
 		CUDA_SAFE_CALL(cudaMalloc(&async_close_rb_gpu, sizeof(async_close_rb_t)));
-		fprintf(stderr, "async_close_rb_gpu: %.2fMB\n", (float)(sizeof(async_close_rb_t)) / (1024.f * 1024.f));
 		CUDA_SAFE_CALL(cudaMemcpy(async_close_rb_gpu,async_close_rb,sizeof(async_close_rb_t),cudaMemcpyHostToDevice));
 		CUDA_SAFE_CALL(cudaMemcpyToSymbol(g_async_close_rb,&async_close_rb_gpu,sizeof(void*))); 
 		
 		CUDA_SAFE_CALL(cudaMalloc(&stagingArea,
 				sizeof(uchar) * RW_HOST_WORKERS * RW_SCRATCH_PER_WORKER * FS_BLOCKSIZE * RW_SLOTS_PER_WORKER));
-		fprintf(stderr, "stagingArea: %.2fMB\n",
-				(float)(sizeof(uchar) * RW_HOST_WORKERS * RW_SCRATCH_PER_WORKER * FS_BLOCKSIZE * RW_SLOTS_PER_WORKER) / (1024.f * 1024.f));
 
 		streamMgr=new GPUStreamManager();
 		gpufs_fd=-1;

@@ -104,6 +104,26 @@ END_SINGLE_THREAD
 	return res;
 }
 
+DEBUG_NOINLINE __device__ int fsync(int fd)
+{
+	__shared__ volatile FTable_entry* file;
+
+	GPU_ASSERT(fd>=0);
+
+BEGIN_SINGLE_THREAD
+
+	file = &g_ftable->files[fd];
+
+END_SINGLE_THREAD
+
+	GPU_ASSERT(file->refCount>0);
+	GPU_ASSERT(fd>=0);
+
+	file->flush(false/*closeFile*/);
+
+	return 0;
+}
+
 DEBUG_NOINLINE __device__ int single_thread_open( const char* filename, int flags )
 {
 //	GPRINT("GPU: Open file: %s\n", filename);
@@ -256,6 +276,10 @@ DEBUG_NOINLINE __device__ volatile PFrame* getRwLockedPage( int fd, int version,
 			if( purpose == PAGE_WRITE_ACCESS )
 			{
 				file->dirty = 1;
+
+				BUSY_LIST_INSERT_START
+				file->busyList.push( pframe );
+				BUSY_LIST_INSERT_STOP
 			}
 
 			// cpu-fd would be less than 0 if we are opening write_once file
@@ -271,12 +295,6 @@ DEBUG_NOINLINE __device__ volatile PFrame* getRwLockedPage( int fd, int version,
 				}
 				pframe->content_size = datasize;
 				entry = tEntry;
-			}
-			else
-			{
-				BUSY_LIST_INSERT_START
-				file->busyList.push( pframe );
-				BUSY_LIST_INSERT_STOP
 			}
 
 		} PAGE_READ_STOP
@@ -420,6 +438,12 @@ DEBUG_NOINLINE __device__ volatile void* gmmap( void *addr, size_t size, int pro
 		GPU_ASSERT("Failed to map beyond the end of file"!=NULL);
 	}
 
+	// Check mapping betong page boundary
+	if( FS_BLOCKSIZE < block_offset + size )
+	{
+		GPU_ASSERT("Failed to map beyond page boundary"!=NULL);
+	}
+
 	if( flags != O_GRDONLY )
 		atomicMax( (uint*) &( pframe->content_size ), block_offset + size );
 
@@ -491,6 +515,10 @@ DEBUG_NOINLINE __device__ volatile PFrame* getRwLockedPage_warp( int fd, int ver
 			if( purpose == PAGE_WRITE_ACCESS )
 			{
 				file->dirty = 1;
+
+				BUSY_LIST_INSERT_START_WARP
+				file->busyList.push( pframe );
+				BUSY_LIST_INSERT_STOP_WARP
 			}
 
 			// cpu-fd would be less than 0 if we are opening write_once file
@@ -503,12 +531,6 @@ DEBUG_NOINLINE __device__ volatile PFrame* getRwLockedPage_warp( int fd, int ver
 					GPU_ASSERT("Failed to read data from CPU"==NULL);
 				}
 				pframe->content_size = datasize;
-			}
-			else
-			{
-				BUSY_LIST_INSERT_START_WARP
-				file->busyList.push( pframe );
-				BUSY_LIST_INSERT_STOP_WARP
 			}
 		}
 
@@ -753,6 +775,49 @@ DEBUG_NOINLINE __device__ size_t gwrite(int fd,size_t offset, size_t size, uchar
 	}
 	return size;
 }
+
+DEBUG_NOINLINE __device__ int gmsync(volatile void *addr, size_t length, int flags)
+{   
+	size_t tmp = ( (char*) addr ) - ( (char*) g_ppool->rawStorage );
+	size_t offset = tmp >> FS_LOGBLOCKSIZE;
+	if( offset >= PPOOL_FRAMES )
+		return -1;
+
+	__threadfence(); // make sure all writes to the page become visible
+
+	volatile PFrame* pf = &( g_ppool->frames[offset] );
+	GPU_ASSERT(pf);
+
+
+	// super ineffisient way to find which file this page belongs to                                  
+	int i=0;                                                                                          
+	for(  i=0;i<FSTABLE_SIZE;i++){
+		if (pf->file_id == g_ftable->files[i].file_id){                                         
+			// no lock on page is required - last 0
+
+			int type = ( g_ftable->files[i].flags == ( O_GWRONCE ) ) 
+				? RW_IPC_DIFF : RW_IPC_WRITE;
+
+			g_async_close_rb->enqueue( g_ftable->files[i].cpu_fd, 
+									   pf->rs_offset, 
+									   pf->file_offset, 
+									   pf->content_size, 
+									   type );
+
+			atomicAdd((int*)&pf->dirtyCounter,-1);
+			break;
+		}
+	}
+
+	GPU_ASSERT(i!=FSTABLE_SIZE);                                                                      
+	// if this assert fires it means that the file with that id was not
+	// found among open files. That's not valid becuase msync works only if the                       
+	// file is mapped -> it cannot be closed.                                                         
+
+	return 0;
+}   
+
+
 
 
 #endif

@@ -36,6 +36,7 @@
 
 #include "fs_initializer.cu.h"
 
+//#define TRACE
 #ifdef TRACE
 
 #define PRINT_TRACE(...) fprintf(stderr, __VA_ARGS__);
@@ -146,7 +147,7 @@ double total_stat1 = 0;
 
 volatile int done = 0;
 
-volatile int readRequests[RW_HOST_WORKERS] = {0};
+volatile int readRequests[RW_HOST_WORKERS] = {-1};
 volatile int activeEntries[RW_HOST_WORKERS][RW_SCRATCH_PER_WORKER][RW_SLOTS_PER_WORKER] = {0};
 
 pthread_mutex_t rwLoopTasksLocks[RW_HOST_WORKERS];
@@ -282,13 +283,15 @@ void async_close_loop(volatile GPUGlobals* globals)
 		if (md.last_page == 1)
 		{
 			// that's the last
-			fprintf(stderr, "closing  dirty file %d\n", md.cpu_fd);
+			PRINT_TRACE("closing  dirty file %d\n", md.cpu_fd);
 			res = close(md.cpu_fd);
 			if (res < 0)
 				perror("Async close failed, and nobody to report to:\n");
 		}
 		else
 		{
+			PRINT_TRACE("writing dirty page at offset %ld\n", md.file_offset);
+
 			uchar* to_write;
 			if (md.type == RW_IPC_DIFF)
 			{
@@ -385,7 +388,7 @@ void mainLoop( volatile GPUGlobals* globals, int gpuid )
 
 			int readReq = readRequests[i];
 
-			if( readReq == 0 )
+			if( readReq == -1 )
 			{
 				continue;
 			}
@@ -393,22 +396,23 @@ void mainLoop( volatile GPUGlobals* globals, int gpuid )
 			PRINT_TRACE( "Got request from worker: %d\n", i );
 
 			// Handle new requests
-			if( readReq > 0 )
+			if( readReq >= 0 )
 			{
 				asyncMemCpyTime[i] -= _timestamp();
 
-				readRequests[i] = 0;
+				readRequests[i] = -1;
 
 				// Notify the rw loop that we've read the request
 				pthread_mutex_lock( &rwLoopTasksLocks[i] );
 				pthread_cond_signal( &rwLoopTasksConds[i] );
 				pthread_mutex_unlock( &rwLoopTasksLocks[i] );
 
-				CUDA_SAFE_CALL(
+				if (readReq > 0) {
+					CUDA_SAFE_CALL(
 						cudaMemcpyAsync( getStagingAreaOffset( globals->stagingArea, i, currentScratchIDs[i]),
 								globals->streamMgr->scratch[i][currentScratchIDs[i]], readReq,
 								cudaMemcpyHostToDevice, globals->streamMgr->memStream[i] ) );
-
+				}
 				CUDA_SAFE_CALL( cudaEventRecord( events[i][currentScratchIDs[i]], globals->streamMgr->memStream[i]));
 
 				PRINT_TRACE( "Recording event[%d][%d]\n", i, currentScratchIDs[i] );
@@ -485,8 +489,13 @@ void* rw_task( void* param )
 
 					cpu_read_size = pread( req_cpu_fd, globals->streamMgr->scratch[id][scratchIdx] + scratchSize, req_size,
 							req_file_offset );
-
-					assert( cpu_read_size > 0 );
+					
+					if (0 > cpu_read_size) {
+						printf("cpu_read_size: %d, req_cpu_fd: %ld, req_size: %ld, req_file_offset: %ld\n",
+								cpu_read_size, req_cpu_fd, req_size, req_file_offset);
+						//pause();
+					}
+					assert( cpu_read_size >= 0 );
 
 					e->return_size = cpu_read_size;
 					e->return_offset = scratchSize;
@@ -590,8 +599,8 @@ void run_gpufs_handler(volatile GPUGlobals* gpuGlobals, int gpuid)
 
 	totalTime += _timestamp();
 
-	fprintf(stderr, "Transfer time: %fms\n", totalTime / 1e3);
-	fprintf(stderr, "Async close loop time: %fms\n", asyncCloseLoopTime / 1e3);
+	PRINT_TIMES("Transfer time: %fms\n", totalTime / 1e3);
+	PRINT_TIMES("Async close loop time: %fms\n", asyncCloseLoopTime / 1e3);
 
 	int totalCount = 0;
 	size_t totalSize = 0;
