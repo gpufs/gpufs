@@ -1,328 +1,379 @@
 /* 
-* This expermental software is provided AS IS. 
-* Feel free to use/modify/distribute, 
-* If used, please retain this disclaimer and cite 
-* "GPUfs: Integrating a file system with GPUs", 
-* M Silberstein,B Ford,I Keidar,E Witchel
-* ASPLOS13, March 2013, Houston,USA
-*/
+ * This expermental software is provided AS IS.
+ * Feel free to use/modify/distribute,
+ * If used, please retain this disclaimer and cite
+ * "GPUfs: Integrating a file system with GPUs",
+ * M Silberstein,B Ford,I Keidar,E Witchel
+ * ASPLOS13, March 2013, Houston,USA
+ */
 
 /* 
-* This expermental software is provided AS IS. 
-* Feel free to use/modify/distribute, 
-* If used, please retain this disclaimer and cite 
-* "GPUfs: Integrating a file system with GPUs", 
-* M Silberstein,B Ford,I Keidar,E Witchel
-* ASPLOS13, March 2013, Houston,USA
-*/
-
-
-
+ * This expermental software is provided AS IS.
+ * Feel free to use/modify/distribute,
+ * If used, please retain this disclaimer and cite
+ * "GPUfs: Integrating a file system with GPUs",
+ * M Silberstein,B Ford,I Keidar,E Witchel
+ * ASPLOS13, March 2013, Houston,USA
+ */
 
 #ifndef FS_STRUCTURES_CU
 #define FS_STRUCTURES_CU
 
 #include "fs_structures.cu.h"
-#include "radix_tree.cu.h"
 #include "fs_globals.cu.h"
+
+DEBUG_NOINLINE __device__ void PFrame::init_thread( volatile Page* _page, int _rs_offset ) volatile
+{
+	page = _page;
+	rs_offset = _rs_offset;
+	file_id = (uint) -1;
+	content_size = 0;
+	file_offset = (uint) -1;
+	dirty = 0;
+	dirtyCounter = 0;
+
+	lock = 0;
+	refCount = 0;
+	state = INVALID;
+}
+
 DEBUG_NOINLINE __device__ void PFrame::clean() volatile
 {
-	file_id=(uint)-1;
-	content_size=-blockIdx.x;
-	file_offset=(uint)-1;
-	dirty=0;
-	dirtyCounter=0;
-	fpage=NULL;
-	
+	file_id = (uint) -1;
+	content_size = (uint)-1;
+	file_offset = (uint) -1;
+	dirty = 0;
+	dirtyCounter = 0;
 }
 
-DEBUG_NOINLINE __device__ void PFrame::init_thread(volatile Page* _page, int _rs_offset) volatile
+DEBUG_NOINLINE __device__ bool PFrame::try_lock_init(int ref) volatile
 {
-	page=_page; rs_offset=_rs_offset;
-	file_id=(uint)-1;
-	content_size=0;
-	file_offset=(uint)-1;
-	dirty=false;
-	dirtyCounter=0;
-}
-
-DEBUG_NOINLINE __device__ void FTable_page_locker::init_thread() volatile
-{
-	page_state=P_EMPTY;
-	rw_counter=0;
-	lock=0;
-}
-
-// 
-DEBUG_NOINLINE __device__ void FTable_page_locker::lock_wait_unlock() volatile
-{
-	MUTEX_LOCK(lock);
-	MUTEX_UNLOCK(lock);
-}
-
-DEBUG_NOINLINE __device__ FTable_page_locker::page_states_t FTable_page_locker::try_lock_rw() volatile
-{
-         FTable_page_locker::page_states_t ret;
-	if (MUTEX_WAS_LOCKED(lock)){
-		 if(1==1) return P_UNDEFINED;
-	}
-	whoami=blockIdx.x;
-	ret=page_state;
-	if ( page_state == P_RW || page_state == P_READY ) {
-		rw_counter++;
-		ret=P_READY;
-		__threadfence();
-	}
-	MUTEX_UNLOCK(lock);
-	return ret;
-}
-DEBUG_NOINLINE __device__ FTable_page_locker::page_states_t FTable_page_locker::try_lock_init() volatile
-{
-	if (MUTEX_WAS_LOCKED(lock)) {
-		if (1==1) return P_UNDEFINED;
-	}
-	// locked at this point
-	rw_counter++;
-	whoami=blockIdx.x;
-	if (page_state==P_EMPTY) {
-		page_state=P_INIT;
-		__threadfence();
-		// lock is kept 
-		return P_INIT; 
-		
-	}
-	// 
-	__threadfence();
-	MUTEX_UNLOCK(lock);
-	return page_state; // return the real state 
-}
-	// true if locked for r/w
-	// otherwise exclusively locked for init 
-DEBUG_NOINLINE __device__ bool FTable_page_locker::lock_init_rw(int blockid) volatile
-{	
-	MUTEX_LOCK(lock);
-	rw_counter++;
-	whoami=blockIdx.x;
-	if (page_state == P_READY || page_state == P_RW) 
+	if( MUTEX_WAS_LOCKED(lock) )
 	{
-		page_state = P_RW;
-		__threadfence();
-	}
-	
-	if (page_state == P_EMPTY) {
-
-		page_state=P_INIT;
-		__threadfence();
-		// we will not unlock until we init the page and call unlock_init
+		// page is busy
+		// GDBG("try_lock_init busy", file_offset, refCount);
 		return false;
 	}
-	
-	__threadfence();
-	MUTEX_UNLOCK(lock);	
-	return true;
-}
-DEBUG_NOINLINE __device__ void FTable_page_locker::unlock_init() volatile
-{
-	// MUTEX TAKEN HERE
-	page_state = P_RW; 
-	// the one which is initing is expected 
-	// to also read it
-	__threadfence();
-	MUTEX_UNLOCK(lock);
-}
 
-DEBUG_NOINLINE __device__ void FTable_page_locker::unlock_rw() volatile
-{
-	MUTEX_LOCK(lock);
-	rw_counter--;
-	GPU_ASSERT(rw_counter>=0);
-	if (rw_counter == 0 ) { page_state = P_READY; }
-	__threadfence();
-	MUTEX_UNLOCK(lock);
-}
-
-// true if locked for flush
-DEBUG_NOINLINE __device__ bool FTable_page_locker::try_lock_flush() volatile
-{
-	if (MUTEX_WAS_LOCKED(lock)) 
-	{	
-		if (1==1) return false;
-	}
-	whoami=blockIdx.x;
-
-	if (rw_counter == 0 && ( page_state == P_READY) ) 
+	if( INVALID == state )
 	{
-		// keep locked!
+		// We are the ones initiating this page
+		state = INIT;
+		refCount = ref;
+		threadfence();
+		// GDBG("try_lock_init", file_offset, refCount);
+		// Keep lock
 		return true;
 	}
-	MUTEX_UNLOCK(lock);
-
-	return false;
-}
-	
-DEBUG_NOINLINE __device__ void FTable_page_locker::unlock_flush() volatile
-{
-	__threadfence();
-	MUTEX_UNLOCK(lock);
-}
-
-DEBUG_NOINLINE __device__ void FTable_page::init_thread() volatile
-{
-	locker.init_thread();	
-	frame=NULL;
-}
-
-DEBUG_NOINLINE __device__ void FTable_page::markDirty() volatile
-{
-	frame->dirty=1;
-}
-
-DEBUG_NOINLINE __device__ void FTable_page::allocPage(int file_id,size_t file_offset) volatile
-{
-	GPU_ASSERT(locker.lock ==1 );
-	volatile PFrame* newframe=g_ppool->allocPage();
-
-	if (newframe == NULL) 
-	{ 
-		GPU_ASSERT(NULL);
-	}
-	newframe->file_id=file_id;
-	newframe->content_size=0;
-	newframe->fpage=this;
-//GPU_ASSERT((file_offset)>=0);
-
-	newframe->file_offset=file_offset;
-	__threadfence();
-	this->frame=newframe;
-	__threadfence();
-	GPU_ASSERT(locker.lock ==1 );
-}
-
-DEBUG_NOINLINE __device__ void FTable_page::freePage(bool locked) volatile
+	else
 	{
-		if (frame) 
-		{
-			volatile PFrame* old=frame;
-			frame=NULL;
-			__threadfence();
+		// It is already initiated by someone else
+		MUTEX_UNLOCK( lock );
+		return false;
+	}
+}
 
-			GPU_ASSERT(locker.rw_counter==0);
-			GPU_ASSERT(locker.page_state == FTable_page_locker::P_READY || 
-					locker.page_state == FTable_page_locker::P_FLUSH);
-			GPU_ASSERT( locker.lock == 1 );
-			g_ppool->freePage(old,locked);
-			__threadfence();
-			locker.init_thread();
-			__threadfence();
+DEBUG_NOINLINE __device__ void PFrame::unlock_init() volatile
+{
+	GPU_ASSERT( lock );
+	GPU_ASSERT( state == INIT || state == UPDATING );
+
+	state = VALID;
+	MUTEX_UNLOCK( lock );
+}
+
+
+
+DEBUG_NOINLINE __device__ bool PFrame::try_lock_rw( int fd, int _version, size_t offset, int ref ) volatile
+{
+	if( MUTEX_WAS_LOCKED(lock) )
+	{
+		// page is busy
+		// GDBG("try_lock_rw busy", offset, refCount);
+		return false;
+	}
+
+	if( state == PFrame::VALID && fd == file_id && file_offset == offset )
+	{
+		if( version == _version )
+		{
+			// This is the right one
+			refCount += ref;
+			threadfence();
+			// GDBG("try_lock_rw", offset, refCount);
+			MUTEX_UNLOCK( lock );
+			return true;
+		}
+		else
+		{
+			// Right page but older version
+			GPU_ASSERT( version < _version );
+			GPU_ASSERT( refCount == 0 );
+
+			state = UPDATING;
+			refCount = ref;
+			version = _version;
+			threadfence();
+			// GDBG("weird", offset, refCount);
+			// Keep lock
+			return true;
 		}
 	}
-
-DEBUG_NOINLINE __device__ void FTable_entry::init_thread(volatile rtree *file_rtree) volatile{
-	pages=file_rtree;
-//	file_size=0;
-}
-
-DEBUG_NOINLINE __device__ void  FTable::init_thread(volatile rtree * file_rtree) volatile{
-	for(int i=0;i<MAX_NUM_FILES;i++)
+	else
 	{
-		files[i].init_thread(&(file_rtree[i]));
+		// page is either invalid or point to a different location
+		MUTEX_UNLOCK( lock );
+		return false;
 	}
 }
-__device__ void FTable_entry::clean() volatile
+
+DEBUG_NOINLINE __device__ void PFrame::unlock_rw(int ref) volatile
 {
-	if (pages) pages->dirty_tree=0;
+	MUTEX_LOCK( lock );
+	refCount -= ref;
+	threadfence();
+	// GDBG("unlock_rw", file_offset, refCount);
+	MUTEX_UNLOCK( lock );
+}
+
+DEBUG_NOINLINE __device__ void PFrame::lock_rw(int ref) volatile
+{
+	MUTEX_LOCK( lock );
+	refCount += ref;
+	MUTEX_UNLOCK( lock );
+}
+
+DEBUG_NOINLINE __device__ bool PFrame::try_invalidate( int fd, size_t offset ) volatile
+{
+	if( MUTEX_WAS_LOCKED(lock) )
+	{
+		// page is busy
+		return false;
+	}
+
+	if( refCount == 0 && fd == file_id && offset == file_offset )
+	{
+		// We can safely remove this page
+		clean();
+		state = INVALID;
+		threadfence();
+		MUTEX_UNLOCK( lock );
+		return true;
+	}
+	else
+	{
+		// Someone is still using it, don't invalidate
+		MUTEX_UNLOCK( lock );
+		return false;
+	}
+}
+
+DEBUG_NOINLINE __device__ void PFrame::markDirty() volatile
+{
+	dirty = 1;
+}
+
+DEBUG_NOINLINE __device__ void BusyList::init_thread() volatile
+{
+	for (int i = 0; i < NUM_BUSY_LISTS; ++i){
+		_lock[i] = 0;
+		heads[i] = NULL;
+	}
+}
+
+DEBUG_NOINLINE __device__ void BusyList::clean() volatile
+{
+	for (int i = 0; i < NUM_BUSY_LISTS; ++i){
+		heads[i] = NULL;
+	}
+}
+
+DEBUG_NOINLINE __device__ void BusyList::push( volatile PFrame* frame ) volatile
+{
+	int id = BLOCK_ID % NUM_BUSY_LISTS;
+
+	lock(id);
+
+	volatile PFrame* temp = heads[id];
+	heads[id] = frame;
+	frame->nextDirty = temp;
+
+	unlock(id);
+}
+
+DEBUG_NOINLINE __device__ void BusyList::lock(int id) volatile
+{
+	MUTEX_LOCK( _lock[id] );
+}
+
+DEBUG_NOINLINE __device__ bool BusyList::try_lock(int id) volatile
+{
+	return MUTEX_TRY_LOCK( _lock[id] );
+}
+
+DEBUG_NOINLINE __device__ void BusyList::unlock(int id) volatile
+{
+	MUTEX_UNLOCK( _lock[id] );
 }
 
 //******* OPEN/CLOSE *//
 
-DEBUG_NOINLINE __device__ void OTable_entry::init_thread() volatile
+DEBUG_NOINLINE __device__ void FTable_entry::init_thread() volatile
 {
-	status=FSENTRY_EMPTY;
-	refCount=0;
-	cpu_fd=-1;
-	cpu_inode=(unsigned int)-1;
+	status = FSENTRY_EMPTY;
+	refCount = 0;
+	file_id = -1;
+	cpu_fd = -1;
+	version = 0;
+	size = 0;
+	drop_cache = 0;
+	dirty = 0;
+	cpu_timestamp = 0;
 }
 
-
-DEBUG_NOINLINE __device__ void OTable_entry::init(const volatile char* _filename, int _flags) volatile
+DEBUG_NOINLINE __device__ void FTable_entry::init( const volatile char* _filename, int _flags ) volatile
 {
-	strcpy_thread(filename,_filename, FILENAME_SIZE);
-	status=FSENTRY_PENDING;
-	refCount=0;
-	cpu_fd=-1;
-	cpu_inode=(unsigned int)-1;
-	flags=_flags;
-	did_open=0;
+	strcpy_thread( filename, _filename, FILENAME_SIZE );
+	status = FSENTRY_PENDING;
+	refCount = 0;
+	cpu_fd = -1;
+	flags = _flags;
+	did_open = 0;
+	version++;
 }
-DEBUG_NOINLINE __device__ void OTable_entry::notify(int _cpu_fd, unsigned int _cpu_inode, size_t _size, int _did_open) volatile
+
+DEBUG_NOINLINE __device__ void FTable_entry::notify( int fd, int _cpu_fd, size_t _size,
+		double timestamp, int _did_open ) volatile
 {
-	cpu_fd=_cpu_fd;
-	cpu_inode=_cpu_inode;
-	did_open=_did_open;
-	size=_size;
+	file_id = fd;
+	cpu_fd = _cpu_fd;
+	size = _size;
+	cpu_timestamp = timestamp;
+	did_open = _did_open;
 	__threadfence();
-	status=FSENTRY_OPEN;
+	status = FSENTRY_OPEN;
 	__threadfence();
 }
-	
-DEBUG_NOINLINE __device__ void OTable_entry::wait_open() volatile
+
+DEBUG_NOINLINE __device__ void FTable_entry::wait_open() volatile
 {
-	WAIT_ON_MEM(status,FSENTRY_OPEN);	
+	WAIT_ON_MEM( status, FSENTRY_OPEN );
 }
 
-DEBUG_NOINLINE __device__ void OTable_entry::clean() volatile
+DEBUG_NOINLINE __device__ void FTable_entry::flush(bool closeFile) volatile
+{
+	if ( !dirty ) return;
+
+	for (int id = 0; id < NUM_BUSY_LISTS; ++id) {
+		BEGIN_SINGLE_THREAD
+			busyList.lock(id);
+		END_SINGLE_THREAD
+
+		volatile PFrame* frame = busyList.heads[id];
+
+		while( frame != NULL ) {
+			syncthreads();
+
+			if( frame->dirty || frame->dirtyCounter>0 )	{
+				syncthreads();
+
+				writeback_page_async_on_close(cpu_fd, frame, flags);
+				frame->dirty = 0;
+				frame->dirtyCounter = 0;
+			}
+
+			frame = frame->nextDirty;
+		}
+
+		BEGIN_SINGLE_THREAD
+			busyList.unlock(id);
+		END_SINGLE_THREAD
+	}
+
+	dirty = false;
+
+	if (closeFile) {
+		writeback_page_async_on_close_done(cpu_fd);
+	}
+}
+
+DEBUG_NOINLINE __device__ void FTable_entry::clean() volatile
 {
 	GPU_ASSERT(refCount==0);
-	status=FSENTRY_EMPTY;
-	did_open=0;
-}	
-
-
-
-DEBUG_NOINLINE __device__ void OTable::lock() volatile
-{
-	MUTEX_LOCK(_lock);
-} 
-	
-DEBUG_NOINLINE __device__ void OTable::unlock() volatile
-{
-	MUTEX_UNLOCK(_lock);
+	status = FSENTRY_EMPTY;
+	did_open = 0;
+	dirty = 0;
 }
 
-DEBUG_NOINLINE __device__ void OTable::init_thread() volatile
+DEBUG_NOINLINE __device__ void FTable_entry::close() volatile
 {
-	for(int i=0;i<FSTABLE_SIZE;i++)
+	GPU_ASSERT(refCount==0);
+	status = FSENTRY_CLOSED;
+	did_open = 0;
+	dirty = 0;
+}
+
+DEBUG_NOINLINE __device__ void FTable::lock() volatile
+{
+	MUTEX_LOCK( _lock );
+}
+
+DEBUG_NOINLINE __device__ void FTable::unlock() volatile
+{
+	MUTEX_UNLOCK( _lock );
+}
+
+DEBUG_NOINLINE __device__ void FTable::init_thread() volatile
+{
+	for( int i = 0; i < FSTABLE_SIZE; i++ )
 	{
-		entries[i].init_thread();
-		_lock=0;
+		files[i].init_thread();
+		_lock = 0;
 	}
 }
-DEBUG_NOINLINE __device__ int OTable::findEntry(volatile const char* filename, volatile bool* isNewEntry, int o_flags) volatile
+
+DEBUG_NOINLINE __device__ int FTable::findEntry( volatile const char* filename, volatile bool* isNewEntry,
+		int o_flags ) volatile
 {
-	// TODO: this can be sped up by creating a management GPU buffer instead of searching CPU every time
+	*isNewEntry = true;
+	int found = E_FSTABLE_FULL;
+	int foundClosed = E_FSTABLE_FULL;
 
-	*isNewEntry=true;
-	int found=E_FSTABLE_FULL;
-
-	for(int i=0;i<FSTABLE_SIZE;i++)
+	for( int i = 0; i < FSTABLE_SIZE; i++ )
 	{
-		if (entries[i].status==FSENTRY_EMPTY ) 
-		{ 
-			found=i; 
+		if( (found == E_FSTABLE_FULL) && (files[i].status == FSENTRY_EMPTY) )
+		{
+			found = i;
 		}
-		else if (!strcmp_thread(filename,entries[i].filename,FILENAME_SIZE))
+		else if( !strcmp_thread( filename, files[i].filename, FILENAME_SIZE ) )
 		{
 			// found entry
-			found=i; 
-			*isNewEntry=false;
+			found = i;
+			*isNewEntry = false;
 			break;
 		}
+		else if( (foundClosed == E_FSTABLE_FULL) && (files[i].status == FSENTRY_CLOSED) )
+		{
+			foundClosed = i;
+		}
 	}
-	if (found!= E_FSTABLE_FULL && *isNewEntry )
+
+	if( *isNewEntry )
 	{
-		entries[found].init(filename,o_flags);
-		__threadfence();
+		if( found != E_FSTABLE_FULL )
+		{
+			files[found].init( filename, o_flags );
+			__threadfence();
+			return found;
+		}
+		else if( foundClosed != E_FSTABLE_FULL )
+		{
+			files[foundClosed].init( filename, o_flags );
+			__threadfence();
+			return foundClosed;
+		}
 	}
+
 	return found;
 }
 #endif

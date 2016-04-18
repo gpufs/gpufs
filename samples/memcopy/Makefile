@@ -7,20 +7,27 @@
 #* ASPLOS13, March 2013, Houston,USA
 #*/
 
+CUDA_ROOT:=/usr/local/cuda
+GPUFSROOTDIR?=../../
 
-CXXFLAGS=-fopenmp -g -O2
+GPUFSINCLUDEDIR=$(GPUFSROOTDIR)/include
+GPUFSLIBDIR=$(GPUFSROOTDIR)/lib
 
-LIBGPUFSDIR=../../libgpufs/
+CUDA_INCLUDE=-I$(GPUFSROOTDIR)/include -I$(CUDA_ROOT)/include
+CUDA_LIB=-L$(GPUFSROOTDIR)/lib -L$(CUDA_ROOT)/lib64 -lgpufs -lcudart
 
-include $(LIBGPUFSDIR)/Makefile
+CXXFLAGS=-O2 $(CUDA_INCLUDE) $(CUDA_LIB)
+NVCCFLAGS=-O2 $(CUDA_INCLUDE) $(CUDA_LIB) --std=c++11 --generate-code code=sm_35,arch=compute_35 -maxrregcount 32
 
-PAYLOAD=cp.cu
+NVCC=$(CUDA_ROOT)/bin/nvcc
 
-cp.o: cp.cpp 
+cp: cp_cuda.o
+	$(NVCC) $(NVCCFLAGS) --cudart static -link -o "cp" cp_cuda.o
 
-cp_cpu: cp.o
-	$(CXX) -o cp_cpu cp.o -O2
+cp_cuda.o: cp.cu
+	$(NVCC) $(NVCCFLAGS) -dc cp.cu -o cp_cuda.o
 
+PHONY:  clean
 
-
-
+clean:
+	rm -f cp *.o *.a

@@ -18,6 +18,8 @@
 #include "async_ipc.cu.h"
 #include <stdlib.h>
 
+__device__ int gpu_rb_lock;
+
 __host__ void ringbuf_page_md_init(page_md_t** cpumd, page_md_t** gpumd, int num_elem){
 		*cpumd=(page_md_t*)malloc(sizeof(page_md_t)*ASYNC_CLOSE_RINGBUF_SIZE);
 		CUDA_SAFE_CALL(cudaHostRegister(*cpumd,sizeof(page_md_t)*ASYNC_CLOSE_RINGBUF_SIZE,cudaHostRegisterMapped));
@@ -30,6 +32,9 @@ __host__ void ringbuf_page_md_init(page_md_t** cpumd, page_md_t** gpumd, int num
 		ringbuf_page_md_init(&cpu_md_ar, &gpu_md_ar_ptr, ASYNC_CLOSE_RINGBUF_SIZE);
 		ringbuf_metadata_init(&cpu_rb,&gpu_rb_ptr, ASYNC_CLOSE_RINGBUF_SIZE);
 		CUDA_SAFE_CALL(cudaMalloc((void**)&gpu_data_ar,sizeof(Page)*ASYNC_CLOSE_RINGBUF_SIZE));
+
+		int zero = 0;
+		cudaMemcpyToSymbol(gpu_rb_lock, &zero, sizeof(int), 0, cudaMemcpyHostToDevice);
 	}
 
 __forceinline__ __device__ void async_close_rb_t::memcpy_page_req(volatile Page* dst, const volatile Page* src, size_t size){	
@@ -86,6 +91,7 @@ __forceinline__ __device__ void async_close_rb_t::memcpy_page_req(volatile Page*
 		__shared__ uint head;
         
 		BEGIN_SINGLE_THREAD
+			MUTEX_LOCK(gpu_rb_lock);
        			while(gpu_rb_ptr->rb_full()); // lock up forever
 			head=gpu_rb_ptr->rb_producer_ptr();
         	END_SINGLE_THREAD
@@ -105,11 +111,13 @@ __forceinline__ __device__ void async_close_rb_t::memcpy_page_req(volatile Page*
 		         __threadfence_system(); // push update to the CPU memory
 			gpu_rb_ptr->rb_produce();
 	        	 __threadfence_system(); // push the update to the CPU
+			MUTEX_UNLOCK(gpu_rb_lock);
 		END_SINGLE_THREAD;
 	}
 
 	bool  __host__ async_close_rb_t::dequeue(Page* p, page_md_t* md, cudaStream_t s){
 		if (cpu_rb->rb_empty()) return false;
+
 		page_md_t* req;
 
 		uint tail=cpu_rb->rb_consumer_ptr();

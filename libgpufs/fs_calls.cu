@@ -1,26 +1,24 @@
 /* 
-* This expermental software is provided AS IS. 
-* Feel free to use/modify/distribute, 
-* If used, please retain this disclaimer and cite 
-* "GPUfs: Integrating a file system with GPUs", 
-* M Silberstein,B Ford,I Keidar,E Witchel
-* ASPLOS13, March 2013, Houston,USA
-*/
+ * This expermental software is provided AS IS.
+ * Feel free to use/modify/distribute,
+ * If used, please retain this disclaimer and cite
+ * "GPUfs: Integrating a file system with GPUs",
+ * M Silberstein,B Ford,I Keidar,E Witchel
+ * ASPLOS13, March 2013, Houston,USA
+ */
 
 /* 
-* This expermental software is provided AS IS. 
-* Feel free to use/modify/distribute, 
-* If used, please retain this disclaimer and cite 
-* "GPUfs: Integrating a file system with GPUs", 
-* M Silberstein,B Ford,I Keidar,E Witchel
-* ASPLOS13, March 2013, Houston,USA
-*/
-
+ * This expermental software is provided AS IS.
+ * Feel free to use/modify/distribute,
+ * If used, please retain this disclaimer and cite
+ * "GPUfs: Integrating a file system with GPUs",
+ * M Silberstein,B Ford,I Keidar,E Witchel
+ * ASPLOS13, March 2013, Houston,USA
+ */
 
 #ifndef FS_CALLS_CU
 #define FS_CALLS_CU
 
-#include "radix_tree.cu.h"
 #include "fs_constants.h"
 #include "fs_debug.cu.h"
 #include "util.cu.h"
@@ -28,612 +26,635 @@
 #include "mallocfree.cu.h"
 #include "fs_structures.cu.h"
 #include "timer.h"
-#include "hash_table.cu.h"
-#include "swapper.cu.h"
 #include "fs_globals.cu.h"
-#include "preclose_table.cu.h"
 #include "fs_calls.cu.h"
+#include "fat_pointer.cu.h"
 // no reference counting here
 
-
-
-
-DEBUG_NOINLINE __device__ int single_thread_fsync(int fd)
-{
-	int res=0;
-	GPU_ASSERT(fd>=0);
-	volatile OTable_entry* e=&g_otable->entries[fd];
-	GPU_ASSERT(e->refCount>0);
-
-
-
-
-	volatile FTable_entry* file=&(g_ftable->files[fd]);
-	unsigned int inode=g_otable->entries[fd].cpu_inode;
-	
-	GPU_ASSERT(fd>=0);
-	GPU_ASSERT(inode!=(unsigned int)-1);
-	// globally locking until everything is flushed
-	// this is a slow operation so we don't hold the g_otable lock
-
-	res=flush_cpu(file,e,e->flags);
-
-	if (res<0) {
-		// TODO: add error handling
-		GPU_ASSERT(NULL);
-	}
-	
-	return res;
-}
-
-
-DEBUG_NOINLINE __device__ int gfsync(int fd){
-	__shared__ int ret;
-	BEGIN_SINGLE_THREAD
-		ret=single_thread_fsync(fd);
-	END_SINGLE_THREAD;
-	return ret;
-}
-
-DEBUG_NOINLINE __device__ int single_thread_ftruncate(int fd, int size)
-{
-	GPU_ASSERT(size==0);
-	GPU_ASSERT(fd>=0);
-
-	volatile OTable_entry* e=&g_otable->entries[fd];
-	int res= truncate_cpu(e->cpu_fd)==0;
-	if (res==0)
-	{
-		e->size=0;
-		g_ftable->files[fd].pages->lock_for_flush();
-		if (g_ftable->files[fd].pages->count !=0)
-		{
-			g_ftable->files[fd].pages->traverse_all(-1,true,0,0); // kill the tree
-		}
-		g_ftable->files[fd].pages->unlock_after_flush();
-	}
-	return res;
-}
-
-
-DEBUG_NOINLINE __device__ int gftruncate(int fd,int size){
-	__shared__ int ret;
-	BEGIN_SINGLE_THREAD
-		ret=single_thread_ftruncate(fd,size);
-	END_SINGLE_THREAD;
-	return ret;
-}
-
 // we must have multiple threads otherwise it 
-DEBUG_NOINLINE __device__ int gclose(int fd)
+DEBUG_NOINLINE __device__ int gclose( int fd )
 {
-	__shared__ volatile OTable_entry* e; 
+	FILE_CLOSE_START
+	__shared__ volatile FTable_entry* file;
 	__shared__ int res;
+
 BEGIN_SINGLE_THREAD
+
 	GPU_ASSERT(fd>=0);
-	g_otable->lock();
-	e=&g_otable->entries[fd];
-	e->refCount--; 
-	GPU_ASSERT(e->refCount>=0);
+	g_ftable->lock();
+	file = &g_ftable->files[fd];
+	file->refCount--;
+	GPU_ASSERT(file->refCount>=0);
 	res=0;
 
+	if (file->refCount>0 || file->status!=FSENTRY_OPEN)
+	{
+		__threadfence();
+		g_ftable->unlock();
+		res=1;
+	}
 
-	if (e->refCount>0 || e->status!=FSENTRY_OPEN) { __threadfence(); g_otable->unlock(); res=1;}
 END_SINGLE_THREAD
-	if (res==1) return 0;
 
-	__shared__ volatile FTable_entry* file;
-	__shared__ unsigned int inode;
-	__shared__ volatile CPU_IPC_OPEN_Entry* cpu_e; 
-	
+	if (res==1)
+	{
+		FILE_CLOSE_STOP
+		return 0;
+	}
+
+	__shared__ volatile CPU_IPC_OPEN_Entry* cpu_e;
 	bool was_dirty;
-BEGIN_SINGLE_THREAD
-	// lock in the opening thread
-	e->status=FSENTRY_CLOSING; // this is not used in any place in the code.. but should have been
 
-	file=&(g_ftable->files[fd]);
-	inode=e->cpu_inode;
-	
-	GPU_ASSERT(inode!=(unsigned int)-1);
-	cpu_e=&(g_cpu_ipcOpenQueue->entries[fd]);
-	was_dirty=file->pages->dirty_tree;
-	
+BEGIN_SINGLE_THREAD
+
+	// lock in the opening thread
+	file->status=FSENTRY_CLOSING; // this is not used in any place in the code.. but should have been
+	cpu_e = &(g_cpu_ipcOpenQueue->entries[fd]);
+	was_dirty=file->dirty;
+
 END_SINGLE_THREAD
 
 // we flush the pages with async queue
 // we have this called by all the threads in a TB, otherwise the copy inside the traverse_all
 // function will be very slow
-	
-	file->pages->traverse_all_for_close(e->cpu_fd,file->pages->dirty_tree,e->flags);
 
-// we do close now: we must hold a global lock on the otable 
-//  because otherwise the thread which is opening a file will get 
+	file->flush(true/*closeFile*/);
+
+// we do close now: we must hold a global lock on the file table
+// because otherwise the thread which is opening a file will get
 // a file handle for a closed file
 
 BEGIN_SINGLE_THREAD
 
-	// first, exchange the page cache for this file
-	g_closed_ftable.lock_table(inode);
-	// this might be a long because it deallocates and frees the tree if there's no more place in the hash table
-	unsigned int drop_residence_inode=0;
-	file->pages=g_closed_ftable.exchange(inode, file->pages,&drop_residence_inode); 
-	GPU_ASSERT(file->pages);
-	g_closed_ftable.unlock_table(inode);
-	
-	res=cpu_e->close(g_otable->entries[fd].cpu_fd,drop_residence_inode,was_dirty,g_otable->entries[fd].did_open);
-
+	res = cpu_e->close(file->cpu_fd, true /*drop_residence_inode*/, was_dirty);
 
 	if (res<0) {
-		GPU_ASSERT(NULL);
+		GPU_ASSERT(false);
 	}
 
+	file->close();
+
 	cpu_e->clean();
-	file->clean();
-	e->clean();
 	__threadfence();
-	g_otable->unlock();
+	g_ftable->unlock();
 
 END_SINGLE_THREAD
 
+	FILE_CLOSE_STOP
 	return res;
-	
 }
 
-/*
-DEBUG_NOINLINE __device__ int gclose(int fd){
-	__shared__ int ret;
-	BEGIN_SINGLE_THREAD
-		ret=single_thread_close(fd);
-	END_SINGLE_THREAD;
-	return ret;
-}
-*/
-
-DEBUG_NOINLINE __device__ int single_thread_open(char* filename, int flags)
+DEBUG_NOINLINE __device__ int fsync(int fd)
 {
-/*
-Lock ftable
-find entry
-increase ref-count
-Unlock ftable
-if not found -> ret E_FTABLE_FULL
+	__shared__ volatile FTable_entry* file;
 
-if (new_entry) -> send CPU open req
-else -> wait on CPU open req
-
-if (req failed) -> 
-Lock ftable
- dec ref_count
- if last -> delete entry
-unlock ftable
-*/
-
-
-	g_otable->lock();
-	bool isNewEntry=false;
-	int fd=g_otable->findEntry(filename,&isNewEntry,flags);
-	
 	GPU_ASSERT(fd>=0);
 
-	if (fd<0) { g_otable->unlock(); return E_FSTABLE_FULL;}
-	
-	volatile OTable_entry* e=&g_otable->entries[fd];
+BEGIN_SINGLE_THREAD
+
+	file = &g_ftable->files[fd];
+
+END_SINGLE_THREAD
+
+	GPU_ASSERT(file->refCount>0);
+	GPU_ASSERT(fd>=0);
+
+	file->flush(false/*closeFile*/);
+
+	return 0;
+}
+
+DEBUG_NOINLINE __device__ int single_thread_open( const char* filename, int flags )
+{
+//	GPRINT("GPU: Open file: %s\n", filename);
+	/*
+	 Lock ftable
+	 find entry
+	 increase ref-count
+	 Unlock ftable
+	 if not found -> ret E_FTABLE_FULL
+
+	 if (new_entry) -> send CPU open req
+	 else -> wait on CPU open req
+
+	 if (req failed) ->
+	 Lock ftable
+	 dec ref_count
+	 if last -> delete entry
+	 unlock ftable
+	 */
+
+	g_ftable->lock();
+	bool isNewEntry = false;
+	int fd = g_ftable->findEntry( filename, &isNewEntry, flags );
+
+	GPU_ASSERT(fd>=0);
+
+	volatile FTable_entry* e = &g_ftable->files[fd];
 	e->refCount++;
 	__threadfence();
-	g_otable->unlock();
-	
-		
-	volatile CPU_IPC_OPEN_Entry* cpu_e=&(g_cpu_ipcOpenQueue->entries[fd]);
-	
-	if (isNewEntry) 	
+	g_ftable->unlock();
+
+	volatile CPU_IPC_OPEN_Entry* cpu_e = &( g_cpu_ipcOpenQueue->entries[fd] );
+
+	if( isNewEntry )
 	{
-		
-	/*	g_preclose_table->lock();
-		if (g_preclose_table->size!=0) {
-			if (g_preclose_table->findEntry(e->filename,&g_ftable->files[fd],e) == 0)
-			{
-				g_preclose_table->unlock();
-				e->notify(e->cpu_fd,e->cpu_inode,e->size);
-				return fd;
-			}
-		}
-		g_preclose_table->unlock();
-	*/	// fetch the 
-		volatile rtree* fpages=NULL;
-		unsigned int cpu_inode=0;
-		double timestamp=0;
+		double timestamp = 0;
 
-		if (flags==O_GRDONLY) {
-			cpu_e->open(filename,flags,DO_NOT_OPEN);
-			cpu_inode=readNoCache(&cpu_e->cpu_inode);
-			g_closed_ftable.lock_table(cpu_inode);
-			fpages=g_closed_ftable.get(cpu_inode);
-			timestamp=readNoCache(&cpu_e->cpu_timestamp);
-			if (fpages!=NULL && fpages->cpu_timestamp!=timestamp) fpages=NULL;
+		cpu_e->open( filename, flags, DO_OPEN );
 
-			if (fpages==NULL) g_closed_ftable.unlock_table(cpu_inode);
-		}
+		timestamp = readNoCache( &cpu_e->cpu_timestamp );
+		int cpu_fd = readNoCache( &cpu_e->cpu_fd );
+		size_t size = readNoCache( &cpu_e->size );
 
-		int did_open=false;
-		if (fpages==NULL){
-			did_open=true;
-
-	//		cpu_e->open(filename,flags,DO_OPEN);
-			if ( flags!=O_GRDONLY) cpu_e->open(filename,flags,DO_OPEN);
-			else cpu_e->reopen();
-
-			cpu_inode=readNoCache(&cpu_e->cpu_inode);
-			timestamp=readNoCache(&cpu_e->cpu_timestamp);
-			g_closed_ftable.lock_table(cpu_inode);
-	
-			fpages=g_closed_ftable.get(cpu_inode);
-		
-		}
-
-		if (fpages!=NULL) 
-		{
-			volatile rtree* fpages_old=g_ftable->files[fd].pages;
-			g_ftable->files[fd].pages=fpages;
-			g_closed_ftable.reset(cpu_inode, fpages_old);
-		}else{
-			g_ftable->files[fd].pages->file_id=getNewFileId();
-		}
-		g_ftable->files[fd].pages->cpu_timestamp=timestamp;
-	
-		g_closed_ftable.unlock_table(cpu_inode);
-
-		// make sure we flush the cache if the owner has changed
-		int cpu_flush_cache=readNoCache(&cpu_e->flush_cache);
-		if (cpu_flush_cache){
-			g_ftable->files[fd].pages->lock_for_flush();
-			if (g_ftable->files[fd].pages->count !=0)
-			{
-				g_ftable->files[fd].pages->traverse_all(-1,true,0,0); // kill the tree
-
-			}
-			g_ftable->files[fd].pages->file_id=getNewFileId();
-			g_ftable->files[fd].pages->unlock_after_flush();
-		}
-		
-		int cpu_fd=readNoCache(&cpu_e->cpu_fd);
-		size_t size=readNoCache(&cpu_e->size);
-		e->notify(cpu_fd,cpu_inode,size,did_open);
+		e->notify( fd, cpu_fd, size, timestamp, 1 );
 	}
-	else {
+	else if( e->status == FSENTRY_CLOSED )
+	{
+		// We found our file but it's close, try to reopen it
+		double timestamp = 0;
+
+		cpu_e->open( filename, flags, DO_OPEN );
+
+		timestamp = readNoCache( &cpu_e->cpu_timestamp );
+		int cpu_fd = readNoCache( &cpu_e->cpu_fd );
+		size_t size = readNoCache( &cpu_e->size );
+
+		if( timestamp == e->cpu_timestamp )
+		{
+			e->notify( fd, cpu_fd, size, timestamp, 1 );
+		}
+		else
+		{
+			// We are reopening the file, increase it's version
+			e->version++;
+			e->notify( fd, cpu_fd, size, timestamp, 1 );
+		}
+	}
+	else
+	{
 		e->wait_open();
 	}
-	
-	if (e->cpu_fd < 0 && e->did_open)  
-	{
-		g_otable->lock();
-		e->refCount--;
-		
-		if (e->refCount==0) 
-		{
-			e->clean();
-			cpu_e->clean();
-		}
-		__threadfence();
-		g_otable->unlock();
-		return E_IPC_OPEN_ERROR;
-	}
+
 	return fd;
 }
 
-
-
-DEBUG_NOINLINE __device__ int gopen(char* filename, int flags){
+DEBUG_NOINLINE __device__ int gopen( const char* filename, int flags )
+{
+	FILE_OPEN_START
 	__shared__ int ret;
 	BEGIN_SINGLE_THREAD
-		ret=single_thread_open(filename,flags);
+		ret = single_thread_open( filename, flags );
 	END_SINGLE_THREAD;
+	FILE_OPEN_STOP
 	return ret;
 }
 
-#define READ 0
-#define WRITE 1
-DEBUG_NOINLINE __device__ volatile FTable_page* getRwLockedPage(volatile FTable_entry* fentry, size_t block_id, int fd, int cpu_fd,int type_req){
+DEBUG_NOINLINE __device__ volatile PFrame* getRwLockedPage( int fd, int version, size_t block_id, int cpu_fd, int purpose )
+{
+	__shared__ volatile PFrame* pframe;
 
-	__shared__ volatile  FTable_page* fpage;
+	BEGIN_SINGLE_THREAD
 
-	__shared__ FTable_page_locker::page_states_t pstate;
-	// try lockless path first
+	PAGE_SEARCH_START
 
-BEGIN_SINGLE_THREAD
+	pframe = NULL;
 
-	int deadlock=0;
-	
-	int file_id=fentry->pages->file_id;
-	while(1){
-		deadlock++;
-		GPU_ASSERT(deadlock<200);
-		pstate=FTable_page_locker::P_INIT;
-		fpage=fentry->pages->getLeaf(block_id,&pstate,0,type_req); // lockless first
-		if (fpage && pstate == FTable_page_locker::P_READY) {
-			// success?
-			GPU_ASSERT(fpage->frame);
-			if ((block_id<<FS_LOGBLOCKSIZE) == fpage->frame->file_offset && file_id == fpage->frame->file_id)
+	while( NULL == pframe )
+	{
+		bool busy;
+
+		pframe = g_hashMap->readPFrame( fd, version, block_id, busy );
+		if( pframe != NULL && !busy )
+		{
+			HM_LOCKLESS
+			break;
+		}
+
+		while( busy )
+		{
+			PAGE_SEARCH_WAIT_START
+			pframe = g_hashMap->readPFrame( fd, version, block_id, busy );
+			PAGE_SEARCH_WAIT_STOP
+
+			if( pframe != NULL )
 			{
-				LOCKLESS_SUCCESS;
 				break;
 			}
-			
 		}
-		fentry->pages->lock_tree();
-		fpage=fentry->pages->getLeaf(block_id,&pstate,1,type_req); // locked version - updates all the counters
-		fentry->pages->unlock_tree();
-		// TODO: handle file size!
-		// TODO: add reasonable dirty bitmap update here
-	
-		// at this point we have 3 options
-		// 1. pstate == P_INIT => page is locked and needs to be inited
-		// 2. pstate == P_UNDEFINED => page is locked by some other process and we need to
-		// retry to getLeaf
-		// 3. pstate = P_RW => lock page with lock_init_rw
-		if (pstate == FTable_page_locker::P_UNDEFINED ) {
-			// we'd better block
-			PAGE_ALLOC_RETRIES
-			fpage->locker.lock_wait_unlock(); // just wait
-			continue;
-		}
-		
-		break;
-	}
-	if (pstate == FTable_page_locker::P_INIT ){
-	
-		GPU_ASSERT(fpage->locker.lock ==1);
-	
-		GPU_ASSERT(fpage->frame==NULL);
-	
 
-	// if we inited, the page is locked and we just keep going
-
-/*** DEBUG
-		if (atomicAdd(&countInited[block_id],1)>=1)  {
-			GPU_ASSERT(0);
-		}
-**/
-
-		fpage->allocPage(file_id,block_id<<FS_LOGBLOCKSIZE);
-//GPU_ASSERT((fpage->frame->file_offset)>=0);
-		
-		// check that the file has been opened
-		volatile OTable_entry* e=&g_otable->entries[fd];
-		
-		
-		 if (readNoCache(&e->did_open) == 0 || readNoCache(&e->did_open) == 2 ) { 
-			// mutual exclusion for concurrent openers
-			int winner=atomicExch((int*)&e->did_open,2);
-			if (winner==0){
-				volatile CPU_IPC_OPEN_Entry* cpu_e=&(g_cpu_ipcOpenQueue->entries[fd]);
-				e->cpu_fd=cpu_e->reopen();
-				__threadfence();
-				e->did_open=1;
-				__threadfence();
-				assert(e->cpu_fd>=0);
-			}else{
-				WAIT_ON_MEM(e->did_open,1);
-			}
-			cpu_fd=e->cpu_fd;
-		 }
-			// cpu-fd would be less than 0 if we are opening write_once file	
-		if (cpu_fd>=0)
+		if( pframe != NULL )
 		{
-		   int datasize=read_cpu(cpu_fd,fpage->frame);
-	           if (datasize < 0) {
-        	         // TODO: error handling
-                       GPU_ASSERT("Failed to read data from CPU"==NULL);
-                   }
-	           fpage->frame->content_size=datasize;
+			HM_LOCKLESS
+			break;
 		}
-	// 	we move this to the write call because we treat mmap with dirtyCounter
-	//	if (type_req==PAGE_WRITE_ACCESS) fpage->markDirty();
-	}
-	GPU_ASSERT((pstate == FTable_page_locker::P_INIT && fpage->locker.lock) || (( pstate == FTable_page_locker::P_RW  || pstate== FTable_page_locker::P_READY) && fpage->locker.rw_counter>0) );
-	// if we do not need to zero out the page (cpu_fd<0) 
 
-	// if the page was initialized, return. Make sure to return with all threads active
-	if (pstate == FTable_page_locker::P_INIT && cpu_fd>=0 ) fpage->locker.unlock_init();
-	
-END_SINGLE_THREAD
-	if ((pstate == FTable_page_locker::P_INIT && cpu_fd >= 0 ) || pstate == FTable_page_locker::P_RW || pstate == FTable_page_locker::P_READY )
-		return fpage;
-
-	//fill the page with zeros - optimization for the case of write-once exclusive create owned by GPU
-	bzero_page((volatile char*)fpage->frame->page);
-	__threadfence(); // make sure all threads will see these zeros
-
-BEGIN_SINGLE_THREAD
-	GPU_ASSERT(cpu_fd<0);
-
-	GPU_ASSERT(pstate == FTable_page_locker::P_INIT);
-        fpage->frame->content_size=0;
-	fpage->locker.unlock_init();
-		
-//GPU_ASSERT(fpage->frame->file_offset>=0);
-
-END_SINGLE_THREAD
-	return fpage;	
-}
-
-DEBUG_NOINLINE __device__ int gmsync(volatile void *addr, size_t length,int flags)
-{
-
-	size_t tmp=((char*)addr)- ((char*)g_ppool->rawStorage);
-//	assert(tmp>=0);
-	size_t offset=tmp>>FS_LOGBLOCKSIZE;
-	GPU_ASSERT(offset<PPOOL_FRAMES);
-	
-	__threadfence(); // make sure all writes to the page become visible
-BEGIN_SINGLE_THREAD
-
-	volatile PFrame* p=&(g_ppool->frames[offset]);
-	volatile FTable_page* fp=p->fpage;
-
-	GPU_ASSERT(fp);
-	// super ineffisient way to find which file this page belongs to
-	int i=0;
-	for(  i=0;i<FSTABLE_SIZE;i++){
-		if (p->file_id == g_ftable->files[i].pages->file_id){
-			// no lock on page is required - last 0
-			writeback_page(g_otable->entries[i].cpu_fd,fp,g_otable->entries[i].flags,0);
-			atomicAdd((int*)&p->dirtyCounter,-1);
+		pframe = g_hashMap->getPFrame( fd, version, block_id );
+		if( pframe != NULL )
+		{
+			HM_LOCKED
 			break;
 		}
 	}
-	GPU_ASSERT(i!=FSTABLE_SIZE);
-	// if this assert fires it means that the file with that id was not
-	// found among open files. That's not valid becuase msync works only if the 
-	// file is mapped -> it cannot be closed.
-	
-END_SINGLE_THREAD
-	return 0;
+
+	PAGE_SEARCH_STOP
+
+	END_SINGLE_THREAD
+
+		volatile __shared__ int entry;
+		entry = -1;
+
+	BEGIN_SINGLE_THREAD
+
+		PAGE_READ_START
+		if( pframe->state == PFrame::INIT || pframe->state == PFrame::UPDATING )
+		{
+			// if we inited, the page is locked and we just keep going
+
+			// Mark the file as dirty if we are adding a write enabled page
+			volatile FTable_entry* file = &g_ftable->files[fd];
+			if( purpose == PAGE_WRITE_ACCESS )
+			{
+				file->dirty = 1;
+
+				BUSY_LIST_INSERT_START
+				file->busyList.push( pframe );
+				BUSY_LIST_INSERT_STOP
+			}
+
+			// cpu-fd would be less than 0 if we are opening write_once file
+
+			if( cpu_fd >= 0 )
+			{
+				int tEntry = -1;
+				int datasize = read_cpu( fd, cpu_fd, pframe, purpose, tEntry );
+				if( datasize < 0 )
+				{
+					// TODO: error handling
+					GPU_ASSERT("Failed to read data from CPU"==NULL);
+				}
+				pframe->content_size = datasize;
+				entry = tEntry;
+			}
+
+		} PAGE_READ_STOP
+
+		GPU_ASSERT( (pframe->state == PFrame::INIT) ||
+						    (pframe->state == PFrame::UPDATING) ||
+						    ((pframe->state == PFrame::VALID) && pframe->refCount>0) );
+	END_SINGLE_THREAD
+
+		if( -1 != entry )
+		{
+
+			COPY_BLOCK_START
+
+			volatile CPU_IPC_RW_Entry* e = &(g_cpu_ipcRWQueue->entries[entry]);
+			int workerID = entry / RW_SLOTS_PER_WORKER;
+
+			copy_block( (uchar*)pframe->page, g_stagingArea[workerID][e->scratch_index] + e->return_offset, e->return_size );
+
+			__syncthreads();
+			COPY_BLOCK_STOP
+		}
+
+
+	BEGIN_SINGLE_THREAD
+
+		if( -1 != entry )
+		{
+			freeEntry( entry );
+
+			int workerID = entry / RW_SLOTS_PER_WORKER;
+			int scratchID = g_cpu_ipcRWQueue->entries[entry].scratch_index;
+
+			atomicSub( (int*)&(g_cpu_ipcRWFlags->entries[workerID][scratchID]), 1 );
+			__threadfence_system();
+
+		}
+
+		// if the page was initialized, return. Make sure to return with all threads active
+		if( ( pframe->state == PFrame::INIT || pframe->state == PFrame::UPDATING ) && cpu_fd >= 0 )
+			pframe->unlock_init();
+
+	END_SINGLE_THREAD
+	if( ( (pframe->state == PFrame::INIT || pframe->state == PFrame::UPDATING) && cpu_fd >= 0 ) || pframe->state == PFrame::VALID )
+		return pframe;
+
+	//fill the page with zeros - optimization for the case of write-once exclusive create owned by GPU
+	bzero_page( (volatile char*) pframe->page );
+	__threadfence(); // make sure all threads will see these zeros
+
+	BEGIN_SINGLE_THREAD
+		GPU_ASSERT(cpu_fd<0);
+
+		GPU_ASSERT(pframe->state == PFrame::INIT);
+		pframe->content_size = 0;
+		pframe->unlock_init();
+
+	END_SINGLE_THREAD
+
+	return pframe;
 }
 
-DEBUG_NOINLINE __device__ int gmunmap(volatile void *addr, size_t length)
+DEBUG_NOINLINE __device__ int gmunmap( volatile void *addr, size_t length )
 {
+	size_t tmp = ( (char*) addr ) - ( (char*) g_ppool->rawStorage );
+	size_t offset = tmp >> FS_LOGBLOCKSIZE;
+	if( offset >= PPOOL_FRAMES )
+		return -1;
 
-	size_t tmp=((char*)addr)- ((char*)g_ppool->rawStorage);
-//	assert(tmp>=0);
-	size_t offset=tmp>>FS_LOGBLOCKSIZE;
-	if (offset>=PPOOL_FRAMES) return -1;
-	
 	__threadfence(); // make sure all writes to the page become visible
-BEGIN_SINGLE_THREAD
+	BEGIN_SINGLE_THREAD
 
-	volatile PFrame* p=&(g_ppool->frames[offset]);
-	volatile FTable_page* fp=p->fpage;
+		volatile PFrame* p = &( g_ppool->frames[offset] );
+		p->unlock_rw();
 
-	GPU_ASSERT(fp);
-	fp->locker.unlock_rw();
+	END_SINGLE_THREAD
 
-END_SINGLE_THREAD
 	return 0;
 }
 
-DEBUG_NOINLINE __device__ volatile void* gmmap(void *addr, size_t size,
-					int prot, int flags, int fd, off_t offset)
+DEBUG_NOINLINE __device__ int gmunmap_warp( volatile void *addr, size_t length, int ref )
 {
+	size_t tmp = ( (char*) addr ) - ( (char*) g_ppool->rawStorage );
+	size_t offset = tmp >> FS_LOGBLOCKSIZE;
+	if( offset >= PPOOL_FRAMES )
+		return -1;
 
-	__shared__ volatile PFrame* frame; // the ptr is to global mem but is stored in shmem
+	__threadfence(); // make sure all writes to the page become visible
+	int laneid = threadIdx.x & 0x1f;
+
+	if( laneid == 0 )
+	{
+		volatile PFrame* p = &( g_ppool->frames[offset] );
+		p->unlock_rw(ref);
+	}
+
+	return 0;
+}
+
+DEBUG_NOINLINE __device__ volatile void* gmmap( void *addr, size_t size, int prot, int flags, int fd, off_t offset )
+{
+	MAP_START
+
+	__shared__ volatile PFrame* pframe; // the ptr is to global mem but is stored in shmem
 	__shared__ size_t block_id;
 	__shared__ int block_offset;
 
-	 volatile FTable_page* fpage;
-	
 	__shared__ int cpu_fd;
-	__shared__ volatile FTable_entry* fentry;
-BEGIN_SINGLE_THREAD	
-	fentry=&g_ftable->files[fd];
-	block_id=offset2block(offset,FS_LOGBLOCKSIZE);
-	block_offset=offset2blockoffset(offset,FS_BLOCKSIZE);
 
+	BEGIN_SINGLE_THREAD
+		block_id = offset2block( offset, FS_LOGBLOCKSIZE );
+		block_offset = offset2blockoffset( offset, FS_BLOCKSIZE );
 
-	GPU_ASSERT(fd>=0 && fd<MAX_NUM_FILES);
-	
-	cpu_fd=g_otable->entries[fd].cpu_fd;
-	GPU_ASSERT(  g_otable->entries[fd].refCount >0 );
+		GPU_ASSERT(fd>=0 && fd<MAX_NUM_FILES);
 
+		cpu_fd = g_ftable->files[fd].cpu_fd;
+		GPU_ASSERT( g_ftable->files[fd].refCount >0 );
 
-	
-	if (block_offset+size > FS_BLOCKSIZE) assert("Reading beyond the  page boundary"==0);
-	
-	GPU_ASSERT(block_id<MAX_BLOCKS_PER_FILE);
-	
-	// decide whether to fetch data or not
-	if ( g_otable->entries[fd].flags == O_GWRONCE ) cpu_fd=-1;
-	
-		
-END_SINGLE_THREAD
-	int purpose= (g_otable->entries[fd].flags == O_GRDONLY) ? PAGE_READ_ACCESS:PAGE_WRITE_ACCESS;
-	fpage=getRwLockedPage(fentry,block_id,fd,cpu_fd, purpose);
-BEGIN_SINGLE_THREAD
-	// page inited, just read, frane us a _shared_ mem variable
-	frame=fpage->frame;
+		if( block_offset + size > FS_BLOCKSIZE )
+			GPU_ASSERT("Reading beyond the  page boundary"==0);
+
+		// decide whether to fetch data or not
+		if( g_ftable->files[fd].flags == O_GWRONCE )
+			cpu_fd = -1;
+
+	END_SINGLE_THREAD
+
+	int purpose = ( g_ftable->files[fd].flags == O_GRDONLY ) ? PAGE_READ_ACCESS : PAGE_WRITE_ACCESS;
+	pframe = getRwLockedPage( fd, g_ftable->files[fd].version, block_id, cpu_fd, purpose );
+
+	BEGIN_SINGLE_THREAD
+	// page inited, just read, frame us a _shared_ mem variable
 
 	// increase dirty counter if mapped as write
-	if (purpose==PAGE_WRITE_ACCESS) atomicAdd((int*)&frame->dirtyCounter,1);
+	if( purpose == PAGE_WRITE_ACCESS )
+		atomicAdd( (int*) &pframe->dirtyCounter, 1 );
 
 	//TODO: handle reading beyond eof
-	if  (frame->content_size < block_offset+size && flags==O_GRDONLY) 
+	if( pframe->content_size < block_offset + size && flags == O_GRDONLY )
 	{
 		GPU_ASSERT("Failed to map beyond the end of file"!=NULL);
 	}
-	if (flags!= O_GRDONLY) atomicMax((uint*)&(frame->content_size),block_offset+size);
 
-
-END_SINGLE_THREAD
-GPU_ASSERT(frame!=NULL); 
-
-	return (void*)(((uchar*)(frame->page))+block_offset);
-}	
-
-DEBUG_NOINLINE __device__ size_t gwrite(int fd,size_t offset, size_t size, uchar* buffer)
-{
-	//attempt to write to a specific block
-	//if null -> allocate
-	// otherwise -> copy to bufcache
-	// mark dirty
-
-	// we ignore that we may run out of disk space
-	
-	GPU_ASSERT(fd>=0 && fd<MAX_NUM_FILES);
-	
-	GPU_ASSERT( g_otable->entries[fd].refCount >0 );
-
-	__shared__ volatile PFrame* frame; // the ptr is to global mem but is stored in shmem
-	__shared__ size_t block_id;
-	__shared__ int block_offset;
-	__shared__ int cpu_fd;
-	__shared__ int written;
-
-	 __shared__  volatile FTable_page* fpage;
-	__shared__ volatile FTable_entry* fentry;
-
-
-	BEGIN_SINGLE_THREAD
-		block_id=offset2block(offset,FS_LOGBLOCKSIZE);
-		block_offset=offset2blockoffset(offset,FS_BLOCKSIZE);
-		fentry=&g_ftable->files[fd];
-		cpu_fd=g_otable->entries[fd].cpu_fd;
-		if (g_otable->entries[fd].flags == O_GWRONCE || ( size == FS_BLOCKSIZE && block_offset==0)) 
-		{	
-			// we will not read the data from CPU if (1) the file is ONLY_ONCE, or the writes are whole-page writes
-			cpu_fd=-1;
-		}
-		written=0;
-	END_SINGLE_THREAD
-	
-	while(written<size){
-		int single_op=min((int)(size-written),(int)(FS_BLOCKSIZE-block_offset));	
-	
-		GPU_ASSERT(block_id<MAX_BLOCKS_PER_FILE);
-		//TODO: handle reading beyond eof
-		// allow multiple threads to get into this function
-		// the value returned is correct only in thread 0
-		fpage=getRwLockedPage(fentry,block_id,fd,cpu_fd, PAGE_WRITE_ACCESS);
-	
-	BEGIN_SINGLE_THREAD
-		frame=fpage->frame;
-	
-		atomicMax((uint*)&frame->content_size,block_offset+single_op);
-		fpage->markDirty();
-		
-	END_SINGLE_THREAD
-		// go over the page and reset it if necessary
-		// cpu_fd==-1 it will reset the page
-	copy_block((uchar*)(frame->page)+block_offset,buffer+written,single_op);
-	__threadfence(); // we must sync here otherwise swapper will be inconsistent
-
-	BEGIN_SINGLE_THREAD
-		written+=single_op;
-		fpage->locker.unlock_rw();
-		// the page is unlocked for flush only here.
-		block_id++;
-		block_offset=0;
-	END_SINGLE_THREAD;
+	// Check mapping betong page boundary
+	if( FS_BLOCKSIZE < block_offset + size )
+	{
+		GPU_ASSERT("Failed to map beyond page boundary"!=NULL);
 	}
-	return size;
+
+	if( flags != O_GRDONLY )
+		atomicMax( (uint*) &( pframe->content_size ), block_offset + size );
+
+	END_SINGLE_THREAD
+	GPU_ASSERT(pframe!=NULL);
+
+	MAP_STOP
+
+	return (void*) ( ( (uchar*) ( pframe->page ) ) + block_offset );
+}
+
+DEBUG_NOINLINE __device__ volatile PFrame* getRwLockedPage_warp( int fd, int version, size_t block_id, int cpu_fd, int purpose, int ref = 1 )
+{
+	BroadcastHelper broadcastHelper;
+
+	volatile PFrame* pframe = NULL;
+
+	int entry = -1;
+
+	int laneid = threadIdx.x & 0x1f;
+
+	if( laneid == 0 )
+	{
+		while( NULL == pframe )
+		{
+			bool busy;
+
+			// try lockless read first
+			// GDBGV("first read", block_id << FS_LOGBLOCKSIZE);
+			pframe = g_hashMap->readPFrame( fd, version, block_id, busy, ref );
+			if( pframe != NULL && !busy )
+			{
+				break;
+			}
+
+			// data is probably there but we couldn't lock the page
+			// wait till it's no longer busy
+			while( busy )
+			{
+				// GDBGV("second read", block_id << FS_LOGBLOCKSIZE);
+				pframe = g_hashMap->readPFrame( fd, version, block_id, busy, ref );
+
+				if( pframe != NULL )
+				{
+					break;
+				}
+			}
+
+			if( pframe != NULL )
+			{
+				break;
+			}
+
+			// lockless didn't work, try a more aggressive approach
+			// GDBGV("get frame", block_id << FS_LOGBLOCKSIZE);
+			pframe = g_hashMap->getPFrame( fd, version, block_id, ref );
+			if( pframe != NULL )
+			{
+				break;
+			}
+		}
+
+		if( pframe->state == PFrame::INIT || pframe->state == PFrame::UPDATING )
+		{
+			// if we inited, the page is locked and we just keep going
+
+			// Mark the file as dirty if we are adding a write enabled page
+			volatile FTable_entry* file = &g_ftable->files[fd];
+			if( purpose == PAGE_WRITE_ACCESS )
+			{
+				file->dirty = 1;
+
+				BUSY_LIST_INSERT_START_WARP
+				file->busyList.push( pframe );
+				BUSY_LIST_INSERT_STOP_WARP
+			}
+
+			// cpu-fd would be less than 0 if we are opening write_once file
+			if( cpu_fd >= 0 )
+			{
+				int datasize = read_cpu( fd, cpu_fd, pframe, purpose, entry );
+				if( datasize < 0 )
+				{
+					// TODO: error handling
+					GPU_ASSERT("Failed to read data from CPU"==NULL);
+				}
+				pframe->content_size = datasize;
+			}
+		}
+
+		GPU_ASSERT( (pframe->state == PFrame::INIT) ||
+				    (pframe->state == PFrame::UPDATING) ||
+				    ((pframe->state == PFrame::VALID) && pframe->refCount>0) );
+	}
+
+	broadcastHelper.v = (void*)pframe;
+	pframe = (typeof(pframe))broadcast(broadcastHelper).v;
+	entry = broadcast( entry );
+
+	if( -1 != entry )
+	{
+		volatile CPU_IPC_RW_Entry* e = &(g_cpu_ipcRWQueue->entries[entry]);
+		int workerID = entry / RW_SLOTS_PER_WORKER;
+
+		copy_block_warp( (uchar*)pframe->page, g_stagingArea[workerID][e->scratch_index] + e->return_offset, e->return_size );
+
+		if( laneid == 0 )
+		{
+			freeEntry( entry );
+
+			int workerID = entry / RW_SLOTS_PER_WORKER;
+			int scratchID = g_cpu_ipcRWQueue->entries[entry].scratch_index;
+
+			atomicSub( (int*)&(g_cpu_ipcRWFlags->entries[workerID][scratchID]), 1 );
+			__threadfence_system();
+		}
+	}
+
+	if( laneid == 0 )
+	{
+		// TODO: it looks like cpu_fd is always >=0. it is returned from reopen and there's an assert that make sure it's positive
+		// if the page was initialized, return. Make sure to return with all threads active
+		if( ( pframe->state == PFrame::INIT || pframe->state == PFrame::UPDATING ) && cpu_fd >= 0 )
+			pframe->unlock_init();
+	}
+
+	if( ( ( pframe->state == PFrame::INIT || pframe->state == PFrame::UPDATING ) && cpu_fd >= 0 ) || pframe->state == PFrame::VALID )
+		return pframe;
+
+	//fill the page with zeros - optimization for the case of write-once exclusive create owned by GPU
+	// TODO: implement a warp level version
+	bzero_page_warp( (volatile char*) pframe->page );
+	__threadfence(); // make sure all threads will see these zeros
+
+	if( laneid == 0 )
+	{
+		GPU_ASSERT(cpu_fd<0);
+
+		GPU_ASSERT(pframe->state == PFrame::INIT);
+		pframe->content_size = 0;
+		pframe->unlock_init();
+	}
+
+	return pframe;
+}
+
+DEBUG_NOINLINE __device__ volatile void* gmmap_warp( void *addr, size_t size, int prot, int flags, int fd, off_t offset, int ref )
+{
+	MAP_START_WARP
+
+	BroadcastHelper broadcastHelper;
+
+	volatile PFrame* pframe;
+	size_t block_id;
+	int block_offset;
+	int cpu_fd;
+
+	int laneid = threadIdx.x & 0x1f;
+
+	if( laneid == 0 )
+	{
+		block_id = offset2block( offset, FS_LOGBLOCKSIZE );
+		block_offset = offset2blockoffset( offset, FS_BLOCKSIZE );
+
+		GPU_ASSERT(fd>=0 && fd<MAX_NUM_FILES);
+
+		cpu_fd = g_ftable->files[fd].cpu_fd;
+		GPU_ASSERT( g_ftable->files[fd].refCount >0 );
+
+		if( block_offset + size > FS_BLOCKSIZE )
+			GPU_ASSERT("Reading beyond the  page boundary"==0);
+
+		// decide whether to fetch data or not
+		if( g_ftable->files[fd].flags == O_GWRONCE )
+			cpu_fd = -1;
+	}
+
+	broadcastHelper.s = block_id;
+	block_id = broadcast( broadcastHelper ).s;
+	block_offset = broadcast( block_offset );
+	cpu_fd = broadcast( cpu_fd );
+
+	int purpose = ( g_ftable->files[fd].flags == O_GRDONLY ) ? PAGE_READ_ACCESS : PAGE_WRITE_ACCESS;
+	pframe = getRwLockedPage_warp( fd, g_ftable->files[fd].version, block_id, cpu_fd, purpose, ref );
+
+//	printf("block_id: %ld, block_offset: %d, pframe: %lx\n", block_id, block_offset, pframe->page);
+
+	if( laneid == 0 )
+	{
+		// page inited, just read, frame us a _shared_ mem variable
+
+		// increase dirty counter if mapped as write
+		if( purpose == PAGE_WRITE_ACCESS )
+			atomicAdd( (int*) &pframe->dirtyCounter, 1 );
+
+		//TODO: handle reading beyond eof
+		if( pframe->content_size < block_offset + size && flags == O_GRDONLY )
+		{
+			GPU_ASSERT("Failed to map beyond the end of file"!=NULL);
+		}
+
+		if( flags != O_GRDONLY )
+			atomicMax( (uint*) &( pframe->content_size ), block_offset + size );
+
+	}
+
+	GPU_ASSERT(pframe!=NULL);
+
+	MAP_STOP_WARP
+
+	return (void*) ( ( (uchar*) ( pframe->page ) ) + block_offset );
 }
 
 // currently pread is expected to be issued by all threads in a thread block
@@ -642,64 +663,159 @@ DEBUG_NOINLINE __device__ size_t gwrite(int fd,size_t offset, size_t size, uchar
 
 DEBUG_NOINLINE __device__ size_t gread(int fd, size_t offset, size_t size, uchar* buffer)
 {
-
-
-	__shared__ volatile PFrame* frame; // the ptr is to global mem but is stored in shmem
-
-	__shared__  volatile FTable_page* fpage;
-
+	__shared__ volatile PFrame* pframe; // the ptr is to global mem but is stored in shmem
 
 	__shared__ size_t block_id;
 	__shared__ int block_offset;
-	
-	__shared__ volatile FTable_entry* fentry;
+
 	__shared__ int cpu_fd;
 	__shared__ int  data_read;
 
-BEGIN_SINGLE_THREAD
+	BEGIN_SINGLE_THREAD
 
-	block_id=offset2block(offset,FS_LOGBLOCKSIZE);
-	block_offset=offset2blockoffset(offset,FS_BLOCKSIZE);
-	fentry=&g_ftable->files[fd];
-	cpu_fd=g_otable->entries[fd].cpu_fd;
+	block_id = offset2block(offset,FS_LOGBLOCKSIZE);
+	block_offset = offset2blockoffset(offset,FS_BLOCKSIZE);
 
 	GPU_ASSERT(fd>=0 && fd<MAX_NUM_FILES);
-	
-	GPU_ASSERT(  g_otable->entries[fd].refCount >0 );
-	
+
+	cpu_fd = g_ftable->files[fd].cpu_fd;
+	GPU_ASSERT(  g_ftable->files[fd].refCount > 0 );
+
 	data_read=0;
-END_SINGLE_THREAD
 
-
-	while(data_read<size){
-
-		int single_op=min((int)(size-data_read),(int)(FS_BLOCKSIZE-block_offset));	
-		
-		GPU_ASSERT(block_id<MAX_BLOCKS_PER_FILE);
-	
-	// synchtreads in getRwLockedPage
-		fpage=getRwLockedPage(fentry,block_id,fd,cpu_fd,PAGE_READ_ACCESS);
-	
-	
-		// page inited, just read, frane us a _shared_ mem variable
-		frame=fpage->frame;
-		//TODO: handle reading beyond eof	
-	
-		GPU_ASSERT(frame!=NULL); 
-	
-		copyNoCache_block(buffer+data_read,(uchar*)(frame->page)+block_offset,single_op);
-		
-	BEGIN_SINGLE_THREAD
-		block_offset=0;
-		data_read+=single_op;
-		block_id++;
-		fpage->locker.unlock_rw();
-	
 	END_SINGLE_THREAD
+
+	while( data_read < size )
+	{
+		int single_op = min((int)(size-data_read),(int)(FS_BLOCKSIZE-block_offset));
+
+		// synchtreads in getRwLockedPage
+		pframe = getRwLockedPage( fd, g_ftable->files[fd].version, block_id, cpu_fd, PAGE_READ_ACCESS );
+
+		// page inited, just read, frame us a _shared_ mem variable
+		//TODO: handle reading beyond eof
+
+		GPU_ASSERT(pframe != NULL);
+
+		copyNoCache_block(buffer + data_read, (uchar*)(pframe->page) + block_offset, single_op);
+
+		BEGIN_SINGLE_THREAD
+
+		block_offset = 0;
+		data_read += single_op;
+		block_id++;
+		pframe->unlock_rw();
+
+		END_SINGLE_THREAD
 	}
 	return size;
-}	
+}
 
+DEBUG_NOINLINE __device__ size_t gwrite(int fd,size_t offset, size_t size, uchar* buffer)
+{
+	// attempt to write to a specific block
+	// if null -> allocate
+	// otherwise -> copy to bufcache
+	// mark dirty
+
+	// we ignore that we may run out of disk space
+
+	GPU_ASSERT( fd >= 0 && fd < MAX_NUM_FILES );
+
+	GPU_ASSERT( g_ftable->files[fd].refCount > 0 );
+
+	__shared__ volatile PFrame* pframe; // the ptr is to global mem but is stored in shmem
+	__shared__ size_t block_id;
+	__shared__ int block_offset;
+	__shared__ int cpu_fd;
+	__shared__ int written;
+
+	BEGIN_SINGLE_THREAD
+
+	block_id = offset2block( offset, FS_LOGBLOCKSIZE );
+	block_offset = offset2blockoffset( offset, FS_BLOCKSIZE );
+	cpu_fd = g_ftable->files[fd].cpu_fd;
+	if( ( g_ftable->files[fd].flags == O_GWRONCE ) || ( size == FS_BLOCKSIZE && block_offset == 0 ) )
+	{
+		// we will not read the data from CPU if (1) the file is ONLY_ONCE, or the writes are whole-page writes
+		cpu_fd=-1;
+	}
+
+	written = 0;
+
+	END_SINGLE_THREAD
+
+	while( written < size )
+	{
+		int single_op = min( (int)(size-written), (int)(FS_BLOCKSIZE-block_offset) );
+
+		//TODO: handle reading beyond eof
+
+		pframe = getRwLockedPage( fd, g_ftable->files[fd].version, block_id, cpu_fd, PAGE_WRITE_ACCESS );
+
+		BEGIN_SINGLE_THREAD
+
+		atomicMax( (uint*)&pframe->content_size, block_offset + single_op );
+		pframe->markDirty();
+
+		END_SINGLE_THREAD
+
+		copy_block( (uchar*)(pframe->page)+block_offset, buffer+written, single_op );
+		__threadfence(); // we must sync here otherwise swapper will be inconsistent
+
+		BEGIN_SINGLE_THREAD
+
+		written += single_op;
+		pframe->unlock_rw();
+		// the page is unlocked for flush only here.
+		block_id++;
+		block_offset=0;
+
+		END_SINGLE_THREAD;
+	}
+	return size;
+}
+
+DEBUG_NOINLINE __device__ int gmsync(volatile void *addr, size_t length, int flags)
+{   
+	size_t tmp = ( (char*) addr ) - ( (char*) g_ppool->rawStorage );
+	size_t offset = tmp >> FS_LOGBLOCKSIZE;
+	if( offset >= PPOOL_FRAMES )
+		return -1;
+
+	__threadfence(); // make sure all writes to the page become visible
+
+	volatile PFrame* pf = &( g_ppool->frames[offset] );
+	GPU_ASSERT(pf);
+
+
+	// super ineffisient way to find which file this page belongs to                                  
+	int i=0;                                                                                          
+	for(  i=0;i<FSTABLE_SIZE;i++){
+		if (pf->file_id == g_ftable->files[i].file_id){                                         
+			// no lock on page is required - last 0
+
+			int type = ( g_ftable->files[i].flags == ( O_GWRONCE ) ) 
+				? RW_IPC_DIFF : RW_IPC_WRITE;
+
+			g_async_close_rb->enqueue( g_ftable->files[i].cpu_fd, 
+									   pf->rs_offset, 
+									   pf->file_offset, 
+									   pf->content_size, 
+									   type );
+
+			atomicAdd((int*)&pf->dirtyCounter,-1);
+			break;
+		}
+	}
+
+	GPU_ASSERT(i!=FSTABLE_SIZE);                                                                      
+	// if this assert fires it means that the file with that id was not
+	// found among open files. That's not valid becuase msync works only if the                       
+	// file is mapped -> it cannot be closed.                                                         
+
+	return 0;
+}   
 
 DEBUG_NOINLINE __device__ uint gunlink(char* filename)
 {
@@ -709,7 +825,9 @@ DEBUG_NOINLINE __device__ uint gunlink(char* filename)
 }
 DEBUG_NOINLINE __device__ size_t fstat(int fd)
 {
-	return g_otable->entries[fd].size;
+	return g_ftable->files[fd].size;
 }
+
+
 
 #endif

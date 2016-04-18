@@ -34,23 +34,8 @@
 #include "mallocfree.cu.h"
 #include "fs_structures.cu.h"
 #include "timer.h"
-#include "hash_table.cu.h"
-#include "radix_tree.cu.h"
-#include "preclose_table.cu.h"
 #include "fs_globals.cu.h"
 #include "gpufs_con_lib.h"
-__global__ void init_fs(volatile CPU_IPC_OPEN_Queue* _ipcOpenQueue, 
-			volatile CPU_IPC_RW_Queue* _ipcRWQueue, 
-			volatile GPU_IPC_RW_Manager* _ipcRWManager, 
-			volatile OTable* _otable, 
-			volatile PPool* _ppool, 
-			volatile Page* _rawStorage,
-			volatile FTable* _ftable,
-			volatile void* _rtree_raw_store,
-			rtree*volatile _rtree_array,
-			volatile preclose_table* _preclose_table,
-			async_close_rb_t* _async_rpc);
-
 
 #define  initGpuShmemPtr(T, h_ptr,symbol)\
 {\
@@ -77,56 +62,72 @@ struct GPUStreamManager
 		CUDA_SAFE_CALL(cudaStreamCreate(&async_close_stream));
 		CUDA_SAFE_CALL(cudaHostAlloc(&async_close_scratch, sizeof(Page),cudaHostAllocDefault));
 
-		for(int i=0;i<RW_IPC_SIZE;i++){
+		for(int i=0;i<RW_HOST_WORKERS;i++)
+		{
 			CUDA_SAFE_CALL(cudaStreamCreate(&memStream[i]));
-			CUDA_SAFE_CALL(cudaHostAlloc(&scratch[i], FS_BLOCKSIZE,cudaHostAllocDefault));
-			task_array[i]=-1;
+
+			for( int j = 0; j < RW_SCRATCH_PER_WORKER; ++j )
+			{
+				CUDA_SAFE_CALL(cudaHostAlloc(&scratch[i][j], FS_BLOCKSIZE * (RW_IPC_SIZE / RW_HOST_WORKERS), cudaHostAllocDefault));
+			}
 		}
 		
 	}
 
 	~GPUStreamManager(){
 		CUDA_SAFE_CALL(cudaStreamDestroy(kernelStream));
-		for(int i=0;i<RW_IPC_SIZE;i++){
+		for(int i=0;i<RW_HOST_WORKERS;i++){
 			CUDA_SAFE_CALL(cudaStreamDestroy(memStream[i]));
-			cudaFreeHost(scratch[i]);
+			for( int j = 0; j < RW_SCRATCH_PER_WORKER; ++j )
+			{
+				CUDA_SAFE_CALL(cudaFreeHost(scratch[i][j]));
+			}
 		}
 		CUDA_SAFE_CALL(cudaStreamDestroy(async_close_stream));
 		CUDA_SAFE_CALL(cudaFreeHost(async_close_scratch));
 	}
 		
 	cudaStream_t kernelStream;
-	cudaStream_t memStream[RW_IPC_SIZE];
+	cudaStream_t memStream[RW_HOST_WORKERS];
 	cudaStream_t async_close_stream;
 	Page* async_close_scratch;
 
-	int task_array[RW_IPC_SIZE];
-	uchar* scratch[RW_IPC_SIZE];
+	uchar* scratch[RW_HOST_WORKERS][RW_SCRATCH_PER_WORKER];
 };
+
+struct GPUGlobals;
+
+struct TaskData
+{
+	int gpuid;
+	int id;
+	volatile GPUGlobals* gpuGlobals;
+};
+
+#define getStagingAreaOffset(stagingArea, i, j) \
+	(stagingArea + i * RW_SCRATCH_PER_WORKER * FS_BLOCKSIZE * RW_SLOTS_PER_WORKER + j * FS_BLOCKSIZE * RW_SLOTS_PER_WORKER)
 
 struct GPUGlobals{
 	volatile CPU_IPC_OPEN_Queue* cpu_ipcOpenQueue;
 	
-	volatile CPU_IPC_RW_Queue* cpu_ipcRWQueue; 
+	volatile CPU_IPC_RW_Queue* cpu_ipcRWQueue;
+
+	volatile CPU_IPC_RW_Flags* cpu_ipcRWFlags;
+
 // RW GPU manager
 	GPU_IPC_RW_Manager* ipcRWManager;
-// Open/Close table
-	OTable* otable;
 // Memory pool
 	PPool* ppool;
 // File table with block pointers
 	FTable* ftable;
 // Raw memory pool
 	Page* rawStorage;
+// Device memory staging area
+	uchar* stagingArea;
 // gpufs device file decsriptor
-        int gpufs_fd;
-// Raw memory pool for radix tree
-	void* rtree_pool;
-// Memory for radix tree array in all file descriptors
-	rtree* rtree_array;
-
-// preclose table:
-	preclose_table* _preclose_table;
+    int gpufs_fd;
+// hashMap for the buffer cache frames
+	HashMap* hashMap;
 
 // async close ringbuffer
  	async_close_rb_t* async_close_rb;
@@ -143,20 +144,17 @@ struct GPUGlobals{
 		initGpuShmemPtr(CPU_IPC_RW_Queue,cpu_ipcRWQueue,g_cpu_ipcRWQueue);
 		cpu_ipcRWQueue->init_host();
 
+		initGpuShmemPtr(CPU_IPC_RW_Flags,cpu_ipcRWFlags,g_cpu_ipcRWFlags);
+		cpu_ipcRWFlags->init_host();
+
 		initGpuGlobals(GPU_IPC_RW_Manager,ipcRWManager,g_ipcRWManager);
-		initGpuGlobals(OTable,otable,g_otable);
 		initGpuGlobals(PPool,ppool,g_ppool);
 		initGpuGlobals(FTable,ftable,g_ftable);
+		initGpuGlobals(HashMap,hashMap,g_hashMap);
 	//	initGpuGlobals(preclose_table,_preclose_table,g_preclose_table);
 	
 		CUDA_SAFE_CALL(cudaMalloc(&rawStorage,sizeof(Page)*PPOOL_FRAMES));
 		CUDA_SAFE_CALL(cudaMemset(rawStorage,0,sizeof(Page)*PPOOL_FRAMES));
-
-		CUDA_SAFE_CALL(cudaMalloc(&rtree_pool,sizeof(rt_node)*MAX_RT_NODES));
-		CUDA_SAFE_CALL(cudaMemset(rtree_pool,0,sizeof(rt_node)*MAX_RT_NODES));
-		
-		CUDA_SAFE_CALL(cudaMalloc(&rtree_array,sizeof(rtree)*(MAX_NUM_FILES + MAX_NUM_CLOSED_FILES)));
-		CUDA_SAFE_CALL(cudaMemset(rtree_array,0,sizeof(rtree)*(MAX_NUM_FILES + MAX_NUM_CLOSED_FILES)));
 
 		async_close_rb=new async_close_rb_t();
 		async_close_rb->init_host();
@@ -164,6 +162,8 @@ struct GPUGlobals{
 		CUDA_SAFE_CALL(cudaMemcpy(async_close_rb_gpu,async_close_rb,sizeof(async_close_rb_t),cudaMemcpyHostToDevice));
 		CUDA_SAFE_CALL(cudaMemcpyToSymbol(g_async_close_rb,&async_close_rb_gpu,sizeof(void*))); 
 		
+		CUDA_SAFE_CALL(cudaMalloc(&stagingArea,
+				sizeof(uchar) * RW_HOST_WORKERS * RW_SCRATCH_PER_WORKER * FS_BLOCKSIZE * RW_SLOTS_PER_WORKER));
 
 		streamMgr=new GPUStreamManager();
 		gpufs_fd=-1;
@@ -173,10 +173,8 @@ struct GPUGlobals{
 	                        perror("gpufs_open failed");
 			}
                 }else{
-			fprintf(stderr,"Warning: GPUFS device was not enabled through USE_GPUFS_DEVICE environment variable\n");
+//			fprintf(stderr,"Warning: GPUFS device was not enabled through USE_GPUFS_DEVICE environment variable\n");
 		}
-
-
 	}
 	
 	~GPUGlobals()
@@ -191,13 +189,10 @@ struct GPUGlobals{
 		cudaFreeHost((void*)cpu_ipcRWQueue);
 		
 		cudaFree(ipcRWManager);
-		cudaFree(otable);
 		cudaFree(ppool);
 		cudaFree(ftable);
 		cudaFree(rawStorage);
-		cudaFree(rtree_pool);
-		cudaFree(rtree_array);
-		cudaFree(_preclose_table);
+		cudaFree(hashMap);
 		cudaFree(async_close_rb_gpu);
 		delete streamMgr;
 	}

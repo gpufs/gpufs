@@ -2,7 +2,7 @@
 # this script runs 1 iteration of every configuration of different matrix sizes
 # 
 
-rm experiment_res; rm all_results
+# rm experiment_res; rm all_results
 
 for i in 104 208 416 832 1664 3328; do
 	for j in 64 128; do

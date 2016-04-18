@@ -22,9 +22,10 @@
 
 #include "fs_constants.h"
 #include "fs_debug.cu.h"
+#include "fs_globals.cu.h"
 #include "util.cu.h"
 #include "mallocfree.cu.h"
-#include "swapper.cu.h"
+#include "hashMap.cu.h"
 #include <assert.h>
 
 
@@ -32,91 +33,220 @@
 DEBUG_NOINLINE __device__  void PPool::init_thread(volatile Page* _storage) volatile
 {
 	rawStorage=_storage;
-	head=0;
-	lock=0;
+
+	int slice = PPOOL_FRAMES / NUM_MEMORY_RINGS;
+
+	for( int i = 0; i < NUM_MEMORY_RINGS; ++i )
+	{
+		subRings[i].head = 0;
+		subRings[i].tail = 0;
+		subRings[i].swapLock = 0;
+		subRings[i].base = i * slice;
+		subRings[i].size = slice;
+	}
+
 	for(int i=0;i<PPOOL_FRAMES;i++)
 	{
 		frames[i].init_thread(&rawStorage[i],i);
-		freelist[i]=i;
+		freeList[i]=i;
 	}
 }
 	
-// TODO: lock free datastructure would be better
 DEBUG_NOINLINE __device__ volatile PFrame* PPool::allocPage() volatile
 {
-	
-	volatile PFrame* frame;
-	MUTEX_LOCK(lock);
-	MALLOC
+	PAGE_ALLOC_START_WARP
 
-	if (head==PPOOL_FRAMES) { 
-		if (swapout(MIN_PAGES_SWAPOUT)== MIN_PAGES_SWAPOUT)
+	int ringID = BLOCK_ID % NUM_MEMORY_RINGS;
+
+	volatile uint	base = subRings[ringID].base;
+	volatile uint&	swapLock = subRings[ringID].swapLock;
+	volatile uint& 	head = subRings[ringID].head;
+	volatile uint& 	tail = subRings[ringID].tail;
+	volatile int& 	size = subRings[ringID].size;
+
+	int oldSize = atomicSub( (int*) &size, 1 );
+
+	if( LOWER_WATER_MARK < oldSize )
+	{
+		uint freeLoc = atomicInc( (uint*) &head, (PPOOL_FRAMES / NUM_MEMORY_RINGS) - 1 );
+		volatile PFrame* pFrame = &( frames[freeList[base + freeLoc]] );
+
+		GPU_ASSERT( freeList[base + freeLoc] == pFrame->rs_offset );
+
+		PAGE_ALLOC_STOP_WARP
+
+		return pFrame;
+	}
+
+	EVICT_START_WARP
+	// else, we are almost out of memory
+	if( MUTEX_TRY_LOCK(swapLock) )
+	{
+//		GDBGV("swapping", oldSize);
+//		GPRINT("%d\n", oldSize);
+
+		// swap
+		uint numSwapped = 0;
+		int numRetries = 0;
+		uint candLoc = tail;
+
+//		GDBGV("candLoc", candLoc);
+		while( NUM_PAGES_SWAPOUT > numSwapped )
 		{
-			// TODO: error handling
-			// we failed to swap out
-			GPU_ASSERT(NULL);
+			volatile PFrame* cand = &( frames[freeList[base + candLoc]] );
+
+			// Try to remove from the hash
+			bool removed = false;
+
+			if( cand->dirty == 0 && cand->dirtyCounter == 0 )
+			{
+				removed = g_hashMap->removePFrame( cand );
+			}
+
+			if( removed )
+			{
+//				GDBGV("candLoc", candLoc);
+				if( candLoc != tail )
+				{
+					// swap tail and current location
+					uint t = freeList[base + tail];
+					freeList[base + tail] = freeList[base + candLoc];
+					freeList[base + candLoc] = t;
+
+					threadfence();
+				}
+
+				freePage( cand, tail, base );
+				numSwapped++;
+				candLoc = ( candLoc + 1 ) % (PPOOL_FRAMES / NUM_MEMORY_RINGS);
+				continue;
+			}
+
+			// else
+			// move it down the ring buffer since it's busy
+//			uint moveLoc = ( candLoc + (PPOOL_FRAMES / 4) ) % PPOOL_FRAMES;
+//			uint t = freeList[moveLoc];
+//			freeList[moveLoc] = freeList[candLoc];
+//			freeList[candLoc] = t;
+//
+//			threadfence();
+
+			// Search for another one
+
+			// In this case we will need to swap the element in tail to prevent loosing it later
+			candLoc = ( candLoc + 1 ) % (PPOOL_FRAMES / NUM_MEMORY_RINGS);
+
+			while( (NUM_SWAP_RETRIES > numRetries) || (0 == numSwapped) )
+			{
+				cand = &( frames[freeList[base + candLoc]] );
+
+				bool removed = false;
+
+				if( cand->dirty == 0 && cand->dirtyCounter == 0 )
+				{
+					removed = g_hashMap->removePFrame( cand );
+				}
+
+				if( removed )
+				{
+//					GDBGV("candLoc", candLoc);
+					// swap tail and current location
+					uint t = freeList[base + tail];
+					freeList[base + tail] = freeList[base + candLoc];
+					freeList[base + candLoc] = t;
+
+					threadfence();
+
+					freePage( cand, tail, base );
+					numSwapped++;
+					candLoc = ( candLoc + 1 ) % (PPOOL_FRAMES / NUM_MEMORY_RINGS);
+					break;
+				}
+
+				// move it down the ring buffer since it's busy
+//				uint moveLoc = ( candLoc + (PPOOL_FRAMES / 4) ) % PPOOL_FRAMES;
+//				uint t = freeList[moveLoc];
+//				freeList[moveLoc] = freeList[candLoc];
+//				freeList[candLoc] = t;
+//
+//				threadfence();
+
+				candLoc = ( candLoc + 1 ) % (PPOOL_FRAMES / NUM_MEMORY_RINGS);
+				numRetries++;
+
+				GPU_ASSERT(numRetries < ((PPOOL_FRAMES / NUM_MEMORY_RINGS) / 2))
+			}
+
+			if( NUM_SWAP_RETRIES <= numRetries  )
+			{
+				break;
+			}
 		}
 
+		GPU_ASSERT( numSwapped > 0 );
+
+//		GDBGV("numSwapped", numSwapped);
+//		GDBGV("numRetries", numRetries);
+
+		uint freeLoc = atomicInc( (uint*) &head, (PPOOL_FRAMES / NUM_MEMORY_RINGS) - 1 );
+		volatile PFrame* pFrame = &( frames[freeList[base + freeLoc]] );
+
+		GPU_ASSERT( freeList[base + freeLoc] == pFrame->rs_offset );
+
+		PAGE_ALLOC_STOP_WARP
+
+		atomicAdd( (int*) &size, numSwapped );
+
+		MUTEX_UNLOCK( swapLock );
+
+		EVICT_STOP_WARP
+		return pFrame;
 	}
-	frame=&frames[freelist[head]];
-	head++;
-	__threadfence();
-	MUTEX_UNLOCK(lock);
-	return frame;
-}
-
-DEBUG_NOINLINE __device__ void PPool::freePage(volatile PFrame* frame, bool locked) volatile 
-{
-
-	if (frame == NULL) return;
-//DEBUG
-//	GPU_ASSERT(0); // 
-
-	if (locked==FREE_LOCKED) MUTEX_LOCK(lock);
-	FREE
-	GPU_ASSERT(head>0);
-	head--;
-	frame->clean();
-	freelist[head]=frame->rs_offset;
-	__threadfence();
-	if (locked==FREE_LOCKED) MUTEX_UNLOCK(lock);
-}
-
-
-DEBUG_NOINLINE __device__ void rt_mempool::init_thread(volatile void* raw_storage, int datasize) volatile
-{
-	GPU_ASSERT(raw_storage);
-	this->raw_storage=raw_storage;
-	this->head=0;
-	this->lock=0;
-	this->blocksize=datasize;
-	for(int i=0;i<MAX_RT_NODES;i++)
+	else if( LOWER_WATER_MARK < oldSize )
 	{
-		freelist[i]=((char*)raw_storage)+i*datasize;
+		uint freeLoc = atomicInc( (uint*) &head, PPOOL_FRAMES - 1 );
+		volatile PFrame* pFrame = &( frames[freeList[base + freeLoc]] );
+
+		GPU_ASSERT( freeList[base + freeLoc] == pFrame->rs_offset );
+
+		PAGE_ALLOC_STOP_WARP
+		EVICT_STOP_WARP
+
+		return pFrame;
+	}
+	else
+	{
+		// Not enough memory, and someone is already swapping
+		// Abort
+		int old = atomicAdd( (int*) &size, 1 );
+//		GDBGV("Revert malloc", old);
+		EVICT_STOP_WARP
+		return NULL;
 	}
 }
 
-DEBUG_NOINLINE __device__ volatile void* rt_mempool::allocNode() volatile
-{
-	RT_MALLOC
-	MUTEX_LOCK(lock);
-	if (head==MAX_RT_NODES) return NULL;
-	volatile void* to_return=freelist[head++];
-	__threadfence();
-	MUTEX_UNLOCK(lock);
-	return to_return;
-}
-DEBUG_NOINLINE __device__ void rt_mempool::freeNode(volatile void* node) volatile
-{
-	RT_FREE
+DEBUG_NOINLINE __device__ void PPool::freePage(volatile PFrame* frame, volatile unsigned int& tail, uint base) volatile {
+	GPU_ASSERT( freeList[base + tail] == frame->rs_offset );
 
-	if (node==NULL) return;
-	GPU_ASSERT(head!=0);
-	MUTEX_LOCK(lock);
-	head--;
-	bzero_thread(node, blocksize);
-	freelist[head]=node;
-	 __threadfence();
-	MUTEX_UNLOCK(lock);
+	frame->clean();
+	freeList[base + tail] = frame->rs_offset;
+	tail = ( tail + 1 ) % (PPOOL_FRAMES / NUM_MEMORY_RINGS);
+	threadfence();
 }
+
+//DEBUG_NOINLINE __device__ bool PPool::tryLockSwapper() volatile
+//{
+//	return MUTEX_TRY_LOCK(swapLock);
+//}
+//
+//DEBUG_NOINLINE __device__ void PPool::lockSwapper() volatile
+//{
+//	MUTEX_LOCK(swapLock);
+//}
+//
+//DEBUG_NOINLINE __device__ void PPool::unlockSwapper() volatile
+//{
+//	MUTEX_UNLOCK(swapLock);
+//}
+
 #endif

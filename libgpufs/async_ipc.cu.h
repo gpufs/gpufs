@@ -24,6 +24,7 @@ struct page_md_t{
 };
 
 
+extern __device__ int gpu_rb_lock;
 
 struct async_close_rb_t{
 	page_md_t* cpu_md_ar;
