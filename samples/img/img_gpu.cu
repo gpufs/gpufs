@@ -9,7 +9,7 @@
 
 
 #include "fs_calls.cu.h"
-#define GREP_ROW_WIDTH (4*1024)
+#define GREP_ROW_WIDTH (1024)
 
 __device__ volatile INIT_LOCK init_lock;
 __device__ volatile LAST_SEMAPHORE last_lock;

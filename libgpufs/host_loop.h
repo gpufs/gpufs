@@ -1,4 +1,4 @@
-/* 
+/*
  * This expermental software is provided AS IS.
  * Feel free to use/modify/distribute,
  * If used, please retain this disclaimer and cite
@@ -7,7 +7,7 @@
  * ASPLOS13, March 2013, Houston,USA
  */
 
-/* 
+/*
  * This expermental software is provided AS IS.
  * Feel free to use/modify/distribute,
  * If used, please retain this disclaimer and cite
@@ -489,7 +489,7 @@ void* rw_task( void* param )
 
 					cpu_read_size = pread( req_cpu_fd, globals->streamMgr->scratch[id][scratchIdx] + scratchSize, req_size,
 							req_file_offset );
-					
+
 					if (0 > cpu_read_size) {
 						printf("cpu_read_size: %d, req_cpu_fd: %ld, req_size: %ld, req_file_offset: %ld\n",
 								cpu_read_size, req_cpu_fd, req_size, req_file_offset);
@@ -506,6 +506,16 @@ void* rw_task( void* param )
 					scratchSize += cpu_read_size;
 					numRequests++;
 
+					break;
+				}
+
+				case RW_IPC_TRUNC:
+				{
+					printf("req_cpu_fd: %d\n", req_cpu_fd);
+					e->return_size = ftruncate(req_cpu_fd, 0);
+					__sync_synchronize();
+					e->status = CPU_IPC_READY;
+					__sync_synchronize();
 					break;
 				}
 

@@ -104,7 +104,7 @@ END_SINGLE_THREAD
 	return res;
 }
 
-DEBUG_NOINLINE __device__ int fsync(int fd)
+DEBUG_NOINLINE __device__ int gfsync(int fd)
 {
 	__shared__ volatile FTable_entry* file;
 
@@ -123,6 +123,31 @@ END_SINGLE_THREAD
 
 	return 0;
 }
+
+DEBUG_NOINLINE __device__ int single_thread_ftruncate(int fd, int size)
+{
+	GPU_ASSERT(size==0);
+	GPU_ASSERT(fd>=0);
+
+	volatile FTable_entry* file = &g_ftable->files[fd];
+	int res= truncate_cpu(file->cpu_fd)==0;
+	if (res==0)
+	{
+		file->size=0;
+		file->version++;
+	}
+	return res;
+}
+
+
+DEBUG_NOINLINE __device__ int gftruncate(int fd,int size){
+	__shared__ int ret;
+	BEGIN_SINGLE_THREAD
+		ret=single_thread_ftruncate(fd,size);
+	END_SINGLE_THREAD;
+	return ret;
+}
+
 
 DEBUG_NOINLINE __device__ int single_thread_open( const char* filename, int flags )
 {

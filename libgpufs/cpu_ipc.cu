@@ -1,4 +1,4 @@
-/* 
+/*
  * This expermental software is provided AS IS.
  * Feel free to use/modify/distribute,
  * If used, please retain this disclaimer and cite
@@ -7,7 +7,7 @@
  * ASPLOS13, March 2013, Houston,USA
  */
 
-/* 
+/*
  * This expermental software is provided AS IS.
  * Feel free to use/modify/distribute,
  * If used, please retain this disclaimer and cite
@@ -233,6 +233,16 @@ __device__ int CPU_IPC_RW_Queue::read_write_page( int fd, int cpu_fd, volatile P
 //	g_ipcRWManager->freeEntry(entry);
 //	return ret_val;
 //}
+
+__device__ int truncate_cpu(int cpu_fd)
+{
+	GPU_ASSERT(cpu_fd>=0);
+	int entry=g_ipcRWManager->findEntry();
+	int ret_val=g_cpu_ipcRWQueue->entries[entry].ftruncate(cpu_fd);
+	g_cpu_ipcRWQueue->entries[entry].clean();
+	g_ipcRWManager->freeEntry(entry);
+	return ret_val;
+}
 
 __device__ int read_cpu( int fd, int cpu_fd, volatile PFrame* frame, int purpose, int& entry )
 {

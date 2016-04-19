@@ -41,7 +41,7 @@ void rpool_populate()
         for(int i=0;i<1<<20;i++) rpool[i]=rand()/(float)INT_MAX;
 }
 
-int v_len=4*1024;
+int v_len=1024;
 //int num_rows=3*32*5;
 int num_db_files=3;
 int max_rows_per_db=10000;
