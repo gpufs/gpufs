@@ -147,7 +147,7 @@ double total_stat1 = 0;
 
 volatile int done = 0;
 
-volatile int readRequests[RW_HOST_WORKERS] = {-1};
+volatile int readRequests[RW_HOST_WORKERS];  //will be unitialized to -1
 volatile int activeEntries[RW_HOST_WORKERS][RW_SCRATCH_PER_WORKER][RW_SLOTS_PER_WORKER] = {0};
 
 pthread_mutex_t rwLoopTasksLocks[RW_HOST_WORKERS];
@@ -188,7 +188,7 @@ void open_loop(volatile GPUGlobals* globals, int gpuid)
 							&pageflush );
 				else
 				{
-//					fprintf( stderr, "Open file: %s\n", filename );
+					// fprintf( stderr, "Open file: %s\n", filename );
 					cpu_fd = open( filename, e->flags, S_IRUSR | S_IWUSR );
 				}
 
@@ -549,6 +549,10 @@ void run_gpufs_handler(volatile GPUGlobals* gpuGlobals, int gpuid)
 {
 	done = 0;
 	asyncCloseLoopTime = 0;
+
+	for (int i = 0; i < RW_HOST_WORKERS; ++i) {
+		readRequests[i] = -1;
+	}
 
 	for( int i = 0; i < RW_HOST_WORKERS; ++i )
 	{
