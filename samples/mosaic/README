@@ -1,0 +1,34 @@
+/* 
+* This expermental software is provided AS IS. 
+* Feel free to use/modify/distribute, 
+* If used, please retain this disclaimer and cite 
+*
+* "GPUfs: Integrating a file system with GPUs", 
+* M Silberstein,B Ford,I Keidar,E Witchel
+* ASPLOS13, March 2013, Houston,USA
+*
+* "ActivePointers: A Case for Software Address Translation on GPUs"
+* S Shahar, S Bergman, M Silberstein
+* ISCA16, June 2016, Seoul, Korea
+*
+* "Supporting data-driven I/O on GPUs using GPUfs"
+* S Shahar, M Silberstein
+* SYSTOR16, June 2016, Haifa, Israel
+*/
+
+This is the mosaic application used both for the ISCA16 and SYSTOR16 mentioned above.
+
+The application assumes the tiny images dataset [1] is located in the working directory.
+The dataset can be downloaded from "http://horatio.cs.nyu.edu/mit/tiny/data/index.html"
+
+Running the application can be done using the "run" script which creates an immage collage out
+of a subset of 2 million images from the tiny image dataset.
+
+Note that this version was only tested using its default parameters. 
+Running the application with 10 million images, as was used in the ISCA16 paper, requires
+setting the K parameter to 27 and modifying some of the memory allocations.
+Also note that this version requires a GPU which supports a larger amount of global memory.
+
+[1] A Torralba, R Fergus, W T Freeman, 
+	"80 million tiny images: A large data set for nonparametric object and scene recognition. Pattern Analysis and Machine Intelligence", 
+	IEEE Transactions on, 30(11), pp.1958-1970.

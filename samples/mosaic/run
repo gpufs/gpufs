@@ -1,0 +1,11 @@
+#!/bin/bash
+
+make
+./preprocessor
+./LSH
+./mosaic -cpu -o mosaic.cpu.jpg
+./mosaic -gpu -o mosaic.gpu.jpg
+./mosaic -gpufs -o mosaic.gpufs.jpg
+./mosaic -warp -o mosaic.warp.jpg
+./mosaic -vm -o mosaic.vm.jpg
+
