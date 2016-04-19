@@ -21,7 +21,7 @@ static const uint HIST_VALS_PER_BIN = 256 / HIST_BINS_PER_CHANEL;
 static const uint OUT_HIST_SIZE = 4096;
 
 static const uint DEFAULT_NUM_IMAGES = 2000000U;
-static const string DEFAULT_DATASET = "tiny.bin";
+static const string DEFAULT_DATASET = "tiny_images.bin";
 static const string DEFAULT_OUTPUT_DATASET = "tiny_2M.bin";
 static const string DEFAULT_OUTPUT_HISTOGRAMS = "tiny_2M.hist";
 
@@ -81,11 +81,6 @@ int main(int argc, char** argv)
 
 	uchar data[ 4096 ];
 	uchar imageData[4096];
-
-	cout << datasetName << ": " << imagesFile << endl;
-	cout << outputDatasetName << ": " << newImagesFile << endl;
-	cout << outputHistogramsName << ": " << newHistogramsFile << endl;
-	cout << nInImages << ": " << nOutImages << endl;
 
 	float *hist = (float*) malloc(OUT_HIST_SIZE);
 
