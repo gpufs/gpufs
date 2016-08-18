@@ -7,7 +7,7 @@
 #* ASPLOS13, March 2013, Houston,USA
 #*/
 
-
+all: fs_gpu fs_gpu_nofs grep_text_cpu
 
 CXXFLAGS=-fopenmp -g -O2
 grep_text_cpu.o: grep_text_cpu.cpp 
@@ -20,13 +20,32 @@ LIBGPUFSDIR=../../libgpufs/
 
 include $(LIBGPUFSDIR)/Makefile
 
-grep_text_gpu_nofs: grep_text_gpu_nofs.cu /home/marks/home/gpufs/workloads/libgpufs/libgpufs.a
-	$(NVCC) -o grep_text_gpu_nofs grep_text_gpu_nofs.cu  -I/home/marks/home/gpufs/workloads/libgpufs/
+#grep_text_gpu_nofs: grep_text_gpu_nofs.cu 
+#	$(NVCC) --relocatable-device-code=true  -o grep_text_gpu_nofs grep_text_gpu_nofs.cu  -I$(LIBGPUFSDIR) $(LIBGPUFSDIR)/release/libgpufs.a
+
+fs_gpu: grep_text_gpu.o
+	$(NVCC) --relocatable-device-code=true -o fs_gpu fs.cu -I$(LIBGPUFSDIR) -I../../gpufs_con_lib.user/ $(LIBGPUFSDIR)/release/libgpufs.a
+
+fs_gpu_nofs: grep_text_gpu_nofs.o
+	$(NVCC) --relocatable-device-code=true -o fs_gpu_nofs fs.cu -I$(LIBGPUFSDIR) -I../../gpufs_con_lib.user/ $(LIBGPUFSDIR)/release/libgpufs.a
+
+#grep_text_gpu.o: grep_text_gpu.cu
+#	$(NVCC) --relocatable-device-code=true -I/home/meni/tanya/gpufs/libgpufs/ /home/meni/tanya/gpufs/libgpufs/release/libgpufs.a grep_text_gpu.cu 
+
+grep_text_gpu.o: grep_text_gpu.cu
+	$(NVCC) -dc grep_text_gpu.cu -I$(LIBGPUFSDIR)
+
+grep_text_gpu.o: grep_text_gpu_nofs.cu
+	$(NVCC) -dc grep_text_gpu_nofs.cu -I$(LIBGPUFSDIR)
 
 #grep_text_gpu.o: grep_text_gpu.cu
 #	$(NVCC) -dc grep_text_gpu.cu -I/home/marks/home/gpufs/workloads/libgpufs/
 
 #gpu: grep_text.cu
 #	make -C ../../gpu debug
+
+clean: 
+	rm *.o fs_gpu fs_gpu_nofs grep_text_cpu
+
 
 

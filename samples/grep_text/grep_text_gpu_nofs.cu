@@ -30,6 +30,11 @@
         }
 
 
+__forceinline__ __device__ void memcpy_thread(volatile char* dst, const volatile char* src, uint size)
+{
+	for( int i=0;i<size;i++)
+		dst[i]=src[i];
+}
 
 
 
