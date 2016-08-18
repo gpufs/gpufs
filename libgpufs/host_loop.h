@@ -155,7 +155,7 @@ pthread_cond_t  rwLoopTasksConds[RW_HOST_WORKERS];
 
 void open_loop(volatile GPUGlobals* globals, int gpuid)
 {
-	char* use_gpufs_lib = getenv( "USE_GPUFS_DEVICE" );
+	char* use_gpufs_lib = 0;//getenv( "USE_GPUFS_DEVICE" );
 
 	for( int i = 0; i < FSTABLE_SIZE; i++ )
 	{
@@ -194,7 +194,7 @@ void open_loop(volatile GPUGlobals* globals, int gpuid)
 
 				if( cpu_fd < 0 )
 				{
-					fprintf( stderr, "Problem with opening file %s on CPU: %s \n ", filename, strerror( errno ) );
+					fprintf( stderr, "Problem with opening file %s on CPU: %s (e->flags = %d)\n ", filename, strerror( errno ), e->flags );
 				}
 
 				if( fstat( cpu_fd, &s ) )
@@ -307,8 +307,9 @@ void async_close_loop(volatile GPUGlobals* globals)
 					md.file_offset);
 			if (ws != md.content_size)
 			{
-				perror(
-						"Writing while async close failed, and nobody to report to:\n");
+				printf(
+						"Writing while async close failed, and nobody to report to: %s\n",
+						strerror( errno ));
 			}
 		}
 	}
