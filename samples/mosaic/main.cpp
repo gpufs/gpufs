@@ -161,23 +161,25 @@ int main(int argc, char** argv)
 
 	int *bests = new int[(hight / 32) * (width / 32)];
 
-	cout << "start mosaic" << endl;
-
 	if( cmdOptionExists(argv, argv + argc, "-gpu") )
 	{
+		cout << "start mosaic on GPU:" << endl;
 		mosaic_GPU( old.data, bests, data, hight, width );
 	}
 	else if( cmdOptionExists(argv, argv + argc, "-gpufs") )
 	{
+		cout << "start mosaic on GPUFS:" << endl;
 		mosaic_GPUfs( old.data, bests, data, hight, width );
 	}
 	else if( cmdOptionExists(argv, argv + argc, "-cpu") )
 	{
+		cout << "start mosaic on CPU:" << endl;
 		mosaic_CPU( old.data, bests, data, hight, width );
 	}
 	else if( cmdOptionExists(argv, argv + argc, "-warp") )
 	{
 #ifdef WARP
+		cout << "start mosaic GPUFS-warp" << endl;
 		mosaic_GPUfs_warp( old.data, bests, data, hight, width );
 #else
 		cout << "Warp not supported in this configuration" << endl;
@@ -187,6 +189,7 @@ int main(int argc, char** argv)
 	else if( cmdOptionExists(argv, argv + argc, "-vm") )
 	{
 #ifdef WARP
+		cout << "start mosaic GPUFS-vm" << endl;
 		mosaic_GPUfs_VM( old.data, bests, data, hight, width );
 #else
 		cout << "VM not supported in this configuration" << endl;

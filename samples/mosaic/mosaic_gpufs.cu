@@ -421,7 +421,7 @@ void mosaic_GPUfs( uchar* inOut, int* bests, AlgData &data, const int ROWS, cons
 
 	checkCudaErrors( cudaEventSynchronize(stop) );
 	checkCudaErrors( cudaEventElapsedTime(&msec, start, stop) );
-	cout << "total time: " << msec << "ms" << endl;
+	cout << "total,time," << msec << ",ms" << endl;
 
 	checkCudaErrors( cudaMemcpy(inOut, d_inOut, IMAGE_SIZE, cudaMemcpyDeviceToHost) );
 

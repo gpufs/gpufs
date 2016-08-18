@@ -32,3 +32,7 @@ Also note that this version requires a GPU which supports a larger amount of glo
 [1] A Torralba, R Fergus, W T Freeman, 
 	"80 million tiny images: A large data set for nonparametric object and scene recognition. Pattern Analysis and Machine Intelligence", 
 	IEEE Transactions on, 30(11), pp.1958-1970.
+
+Compilation:
+You should install opencv and tbb.
+If opencv uses lippivc (check with pkg-config --libs opencv) then remove it from: /usr/local/lib/pkgconfig/opencv.pc
