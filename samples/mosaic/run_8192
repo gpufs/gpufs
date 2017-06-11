@@ -1,0 +1,34 @@
+#!/bin/bash
+
+make
+#if [ ! -f tiny_images.bin ]; then
+#	echo "tiny_images.bin not found!"
+#	exit -1
+#fi
+
+if [ ! -f "tiny_2M.bin" ]; then
+	echo
+	echo "Running preprocessor"
+	echo
+	./preprocessor
+fi
+
+if [ ! -f "tiny_2M.param" ]; then
+	echo
+	echo "Preparing LSH tables"
+	echo
+	./LSH -dump tiny_2M.param
+	./LSH -load tiny_2M.param -dump-tables tiny_2M
+fi
+
+echo
+echo "Running mosaic"
+echo
+./mosaic -cpu -o mosaic.cpu.jpg -i 8192x6144.jpg
+echo
+./mosaic -gpu -o mosaic.gpu.jpg -i 8192x6144.jpg
+echo
+./mosaic -gpufs -o mosaic.gpufs.jpg -i 8192x6144.jpg
+#./mosaic -warp -o mosaic.warp.jpg
+#./mosaic -vm -o mosaic.vm.jpg
+

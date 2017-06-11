@@ -160,7 +160,7 @@ int main(int argc, char** argv)
 	cvtColor(old, old, CV_RGB2RGBA, 4);
 
 	int *bests = new int[(hight / 32) * (width / 32)];
-
+cout << "Running on image " << input << endl;
 	if( cmdOptionExists(argv, argv + argc, "-gpu") )
 	{
 		cout << "start mosaic on GPU:" << endl;
