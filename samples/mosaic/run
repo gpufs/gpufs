@@ -1,10 +1,10 @@
 #!/bin/bash
 
 make
-if [ ! -f tiny_images.bin ]; then
-	echo "tiny_images.bin not found!"
-	exit -1
-fi
+#if [ ! -f tiny_images.bin ]; then
+#	echo "tiny_images.bin not found!"
+#	exit -1
+#fi
 
 if [ ! -f "tiny_2M.bin" ]; then
 	echo
@@ -25,8 +25,10 @@ echo
 echo "Running mosaic"
 echo
 ./mosaic -cpu -o mosaic.cpu.jpg
+echo
 ./mosaic -gpu -o mosaic.gpu.jpg
+echo
 ./mosaic -gpufs -o mosaic.gpufs.jpg
-./mosaic -warp -o mosaic.warp.jpg
-./mosaic -vm -o mosaic.vm.jpg
+#./mosaic -warp -o mosaic.warp.jpg
+#./mosaic -vm -o mosaic.vm.jpg
 
