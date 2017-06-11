@@ -60,7 +60,7 @@ DEBUG_NOINLINE __device__ bool PFrame::try_lock_init(int ref) volatile
 		// We are the ones initiating this page
 		state = INIT;
 		refCount = ref;
-		threadfence();
+		__threadfence();
 		// GDBG("try_lock_init", file_offset, refCount);
 		// Keep lock
 		return true;
@@ -99,7 +99,7 @@ DEBUG_NOINLINE __device__ bool PFrame::try_lock_rw( int fd, int _version, size_t
 		{
 			// This is the right one
 			refCount += ref;
-			threadfence();
+			__threadfence();
 			// GDBG("try_lock_rw", offset, refCount);
 			MUTEX_UNLOCK( lock );
 			return true;
@@ -113,7 +113,7 @@ DEBUG_NOINLINE __device__ bool PFrame::try_lock_rw( int fd, int _version, size_t
 			state = UPDATING;
 			refCount = ref;
 			version = _version;
-			threadfence();
+			__threadfence();
 			// GDBG("weird", offset, refCount);
 			// Keep lock
 			return true;
@@ -131,7 +131,7 @@ DEBUG_NOINLINE __device__ void PFrame::unlock_rw(int ref) volatile
 {
 	MUTEX_LOCK( lock );
 	refCount -= ref;
-	threadfence();
+	__threadfence();
 	// GDBG("unlock_rw", file_offset, refCount);
 	MUTEX_UNLOCK( lock );
 }
@@ -156,7 +156,7 @@ DEBUG_NOINLINE __device__ bool PFrame::try_invalidate( int fd, size_t offset ) v
 		// We can safely remove this page
 		clean();
 		state = INVALID;
-		threadfence();
+		__threadfence();
 		MUTEX_UNLOCK( lock );
 		return true;
 	}
@@ -272,10 +272,10 @@ DEBUG_NOINLINE __device__ void FTable_entry::flush(bool closeFile) volatile
 		volatile PFrame* frame = busyList.heads[id];
 
 		while( frame != NULL ) {
-			syncthreads();
+			__syncthreads();
 
 			if( frame->dirty || frame->dirtyCounter>0 )	{
-				syncthreads();
+				__syncthreads();
 
 				writeback_page_async_on_close(cpu_fd, frame, flags);
 				frame->dirty = 0;

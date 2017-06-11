@@ -60,7 +60,7 @@ calcKeys(uchar *inOut, uint *keys, float* coef, const int width, const int D,con
 		hist[threadID] = 0;
 	}
 
-	syncthreads();
+	__syncthreads();
 
 	int base = by * blockDim.y * width + bx * blockDim.x;
 
@@ -70,7 +70,7 @@ calcKeys(uchar *inOut, uint *keys, float* coef, const int width, const int D,con
 	atomicAdd( &hist[1 * 256 + myPix.g ], 1.f );
 	atomicAdd( &hist[2 * 256 + myPix.b ], 1.f );
 
-	syncthreads();
+	__syncthreads();
 
 	if( threadID < 768 )
 	{
@@ -79,7 +79,7 @@ calcKeys(uchar *inOut, uint *keys, float* coef, const int width, const int D,con
 		globHist[base + ty * width + tx] = hist[threadID];
 	}
 
-	syncthreads();
+	__syncthreads();
 
 	uint bit = 0;
 	if( tx < K )
@@ -143,7 +143,7 @@ chooseBest(uchar *inOut, int *candidates, int* hists, const int width, const int
 		uchar* candT = (uchar*)hists + candID * HIST_SIZE_ON_DISK;
 		float* cand = (float*)candT;
 
-		syncthreads();
+		__syncthreads();
 
 		float myDiff = 0;
 		float candHist1 = cand[0 * 256 + threadID];
@@ -193,10 +193,10 @@ chooseBest(uchar *inOut, int *candidates, int* hists, const int width, const int
 			}
 		}
 
-		syncthreads();
+		__syncthreads();
 	}
 
-	syncthreads();
+	__syncthreads();
 
 	if( 0 == threadID )
 	{

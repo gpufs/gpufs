@@ -113,7 +113,7 @@ DEBUG_NOINLINE __device__ volatile PFrame* PPool::allocPage() volatile
 					freeList[base + tail] = freeList[base + candLoc];
 					freeList[base + candLoc] = t;
 
-					threadfence();
+					__threadfence();
 				}
 
 				freePage( cand, tail, base );
@@ -155,7 +155,7 @@ DEBUG_NOINLINE __device__ volatile PFrame* PPool::allocPage() volatile
 					freeList[base + tail] = freeList[base + candLoc];
 					freeList[base + candLoc] = t;
 
-					threadfence();
+					__threadfence();
 
 					freePage( cand, tail, base );
 					numSwapped++;
@@ -231,7 +231,7 @@ DEBUG_NOINLINE __device__ void PPool::freePage(volatile PFrame* frame, volatile 
 	frame->clean();
 	freeList[base + tail] = frame->rs_offset;
 	tail = ( tail + 1 ) % (PPOOL_FRAMES / NUM_MEMORY_RINGS);
-	threadfence();
+	__threadfence();
 }
 
 //DEBUG_NOINLINE __device__ bool PPool::tryLockSwapper() volatile

@@ -85,7 +85,7 @@ __global__ void mosaicKernel(const char* histFileName, uchar *inOut, float* coef
 	hist[1 * 256 + threadID] = 0.f;
 	hist[2 * 256 + threadID] = 0.f;
 
-	syncthreads();
+	__syncthreads();
 
 	int base = by * BLOCK_SIZE * width + bx * BLOCK_SIZE;
 
@@ -110,7 +110,7 @@ __global__ void mosaicKernel(const char* histFileName, uchar *inOut, float* coef
 	atomicAdd( (float*)&hist[1 * 256 + myPix3.g ], 1.f );
 	atomicAdd( (float*)&hist[2 * 256 + myPix3.b ], 1.f );
 
-	syncthreads();
+	__syncthreads();
 
 	float myBlockHist1 = hist[0 * 256 + threadID];
 	float myBlockHist2 = hist[1 * 256 + threadID];
@@ -149,7 +149,7 @@ __global__ void mosaicKernel(const char* histFileName, uchar *inOut, float* coef
 	candidates[threadID] = -1;
 	idx = 0;
 
-	syncthreads();
+	__syncthreads();
 
 	for( int l = 0; l < 32; ++l )
 	{
@@ -206,20 +206,20 @@ __global__ void mosaicKernel(const char* histFileName, uchar *inOut, float* coef
 			}
 		}
 
-		syncthreads();
+		__syncthreads();
 
 		for( int c = 0; c < numCands; ++c )
 		{
 			found = false;
 
-			syncthreads();
+			__syncthreads();
 
 			if( candidates[threadID] == cand[c] )
 			{
 				found = true;
 			}
 
-			syncthreads();
+			__syncthreads();
 
 			if( threadID == 0 )
 			{
@@ -230,10 +230,10 @@ __global__ void mosaicKernel(const char* histFileName, uchar *inOut, float* coef
 				}
 			}
 
-			syncthreads();
+			__syncthreads();
 		}
 
-		syncthreads();
+		__syncthreads();
 	}
 
 	size_t best = 0;
@@ -243,7 +243,7 @@ __global__ void mosaicKernel(const char* histFileName, uchar *inOut, float* coef
 
 	int histFile = gopen(histFileName, O_GRDONLY);
 
-	syncthreads();
+	__syncthreads();
 
 	for( int i = 0; i < MAX_CAND_LIST_SIZE; ++i )
 	{
@@ -254,7 +254,7 @@ __global__ void mosaicKernel(const char* histFileName, uchar *inOut, float* coef
 		size_t candID = candidates[ i ];
 
 		volatile float* cand = (volatile float*)gmmap(NULL, 3 * 256 * sizeof(float), 0, O_GRDONLY, histFile, candID * HIST_SIZE_ON_DISK);
-		syncthreads();
+		__syncthreads();
 
 		cand += threadID;
 		float candHist1 = *cand;
@@ -307,7 +307,7 @@ __global__ void mosaicKernel(const char* histFileName, uchar *inOut, float* coef
 		}
 
 		gmunmap(cand, NULL);
-		syncthreads();
+		__syncthreads();
 	}
 
 	gclose(histFile);
@@ -463,7 +463,7 @@ __global__ void mosaicKernelWarp(const char* histFileName, uchar *inOut, float* 
 	hist[1 * 256 + threadID] = 0.f;
 	hist[2 * 256 + threadID] = 0.f;
 
-	syncthreads();
+	__syncthreads();
 
 	int base = by * BLOCK_SIZE * width + bx * BLOCK_SIZE;
 
@@ -488,7 +488,7 @@ __global__ void mosaicKernelWarp(const char* histFileName, uchar *inOut, float* 
 	atomicAdd( (float*)&hist[1 * 256 + myPix3.g ], 1.f );
 	atomicAdd( (float*)&hist[2 * 256 + myPix3.b ], 1.f );
 
-	syncthreads();
+	__syncthreads();
 
 	__shared__ uint keys[32];
 
@@ -523,7 +523,7 @@ __global__ void mosaicKernelWarp(const char* histFileName, uchar *inOut, float* 
 	candidates[threadID] = -1;
 	idx = 0;
 
-	syncthreads();
+	__syncthreads();
 
 	for( int l = 0; l < 32; ++l )
 	{
@@ -580,20 +580,20 @@ __global__ void mosaicKernelWarp(const char* histFileName, uchar *inOut, float* 
 			}
 		}
 
-		syncthreads();
+		__syncthreads();
 
 		for( int c = 0; c < numCands; ++c )
 		{
 			found = false;
 
-			syncthreads();
+			__syncthreads();
 
 			if( candidates[threadID] == cand[c] )
 			{
 				found = true;
 			}
 
-			syncthreads();
+			__syncthreads();
 
 			if( threadID == 0 )
 			{
@@ -604,10 +604,10 @@ __global__ void mosaicKernelWarp(const char* histFileName, uchar *inOut, float* 
 				}
 			}
 
-			syncthreads();
+			__syncthreads();
 		}
 
-		syncthreads();
+		__syncthreads();
 	}
 
 	int histFile = gopen(histFileName, O_GRDONLY);
@@ -666,7 +666,7 @@ __global__ void mosaicKernelWarp(const char* histFileName, uchar *inOut, float* 
 		minDiffs[ty] = minDiff;
 	}
 
-	syncthreads();
+	__syncthreads();
 	gclose(histFile);
 
 	// Now we need to go over all the bests and find the best one
@@ -859,7 +859,7 @@ __global__ void mosaicKernelVM(const char* histFileName, uchar *inOut, float* co
 	hist[1 * 256 + threadID] = 0.f;
 	hist[2 * 256 + threadID] = 0.f;
 
-	syncthreads();
+	__syncthreads();
 
 	int base = by * BLOCK_SIZE * width + bx * BLOCK_SIZE;
 
@@ -884,7 +884,7 @@ __global__ void mosaicKernelVM(const char* histFileName, uchar *inOut, float* co
 	atomicAdd( (float*)&hist[1 * 256 + myPix3.g ], 1.f );
 	atomicAdd( (float*)&hist[2 * 256 + myPix3.b ], 1.f );
 
-	syncthreads();
+	__syncthreads();
 
 	__shared__ uint keys[32];
 
@@ -919,7 +919,7 @@ __global__ void mosaicKernelVM(const char* histFileName, uchar *inOut, float* co
 	candidates[threadID] = -1;
 	idx = 0;
 
-	syncthreads();
+	__syncthreads();
 
 	for( int l = 0; l < 32; ++l )
 	{
@@ -976,20 +976,20 @@ __global__ void mosaicKernelVM(const char* histFileName, uchar *inOut, float* co
 			}
 		}
 
-		syncthreads();
+		__syncthreads();
 
 		for( int c = 0; c < numCands; ++c )
 		{
 			found = false;
 
-			syncthreads();
+			__syncthreads();
 
 			if( candidates[threadID] == cand[c] )
 			{
 				found = true;
 			}
 
-			syncthreads();
+			__syncthreads();
 
 			if( threadID == 0 )
 			{
@@ -1000,10 +1000,10 @@ __global__ void mosaicKernelVM(const char* histFileName, uchar *inOut, float* co
 				}
 			}
 
-			syncthreads();
+			__syncthreads();
 		}
 
-		syncthreads();
+		__syncthreads();
 	}
 
 	int histFile = gopen(histFileName, O_GRDONLY);
@@ -1066,7 +1066,7 @@ __global__ void mosaicKernelVM(const char* histFileName, uchar *inOut, float* co
 		minDiffs[ty] = minDiff;
 	}
 
-	syncthreads();
+	__syncthreads();
 	gclose(histFile);
 
 	// Now we need to go over all the bests and find the best one

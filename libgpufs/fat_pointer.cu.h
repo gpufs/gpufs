@@ -589,7 +589,7 @@ public:
 							line.physPage = physical;
 						}
 
-						threadfence();
+						__threadfence();
 
 						if( LANE_ID == 0 )
 						{

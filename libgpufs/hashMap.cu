@@ -93,10 +93,10 @@ DEBUG_NOINLINE __device__ volatile PFrame* HashMap::getPFrame( int fd, int versi
 		newData->file_id = fd;
 		newData->file_offset = offset;
 		newData->version = version;
-		threadfence();
+		__threadfence();
 
 		frames[index] = newData;
-		threadfence();
+		__threadfence();
 
 		MUTEX_UNLOCK( locks[index] );
 		return newData;
@@ -137,10 +137,10 @@ DEBUG_NOINLINE __device__ volatile PFrame* HashMap::getPFrame( int fd, int versi
 
 	// Make sure the pointers are always valid and seen by everyone in the correct order
 	newData->next = frames[index];
-	threadfence();
+	__threadfence();
 
 	frames[index] = newData;
-	threadfence();
+	__threadfence();
 
 	MUTEX_UNLOCK( locks[index] );
 	return newData;
@@ -177,9 +177,9 @@ DEBUG_NOINLINE __device__ bool HashMap::removePFrame( volatile PFrame* pframe ) 
 
 
 		frames[index] = it->next;
-		threadfence();
+		__threadfence();
 		it->next = NULL;
-		threadfence();
+		__threadfence();
 
 		MUTEX_UNLOCK( locks[index] );
 		return true;
@@ -203,7 +203,7 @@ DEBUG_NOINLINE __device__ bool HashMap::removePFrame( volatile PFrame* pframe ) 
 
 			prev->next = it->next;
 			it->next = NULL;
-			threadfence();
+			__threadfence();
 
 			MUTEX_UNLOCK( locks[index] );
 			return true;
