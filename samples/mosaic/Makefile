@@ -4,7 +4,7 @@ CUDAINC=-I$(CUDA_DIR)/include
 CC=/usr/bin/g++
 CCLINK = $(CC)
 GPUFSDIR=../../libgpufs
-#FLAGS?=-DWARP -DGPUFS_VM
+FLAGS?=-DWARP -DGPUFS_VM
 
 CXXFLAGS = -std=c++0x
 LDLIBS = -lopencv_core -lopencv_highgui -lopencv_imgproc -ltbb
